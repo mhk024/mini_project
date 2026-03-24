@@ -2,10 +2,10 @@ import streamlit as st
 import requests
 
 # Backend URLs
-API_URL = "http://localhost:8000/ask"
-UPLOAD_URL = "http://localhost:8000/upload"
-LOGIN_URL = "http://localhost:8000/login"
-SIGNUP_URL = "http://localhost:8000/signup"
+API_URL    = "http://127.0.0.1:8000/ask"
+UPLOAD_URL = "http://127.0.0.1:8000/upload"
+LOGIN_URL  = "http://127.0.0.1:8000/login"
+SIGNUP_URL = "http://127.0.0.1:8000/signup"
 
 st.set_page_config(page_title="RAG Q&A Bot", page_icon="🤖")
 

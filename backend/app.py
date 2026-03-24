@@ -17,20 +17,13 @@ def save_users(users):
     with open(USERS_FILE, "w") as f:
         json.dump(users, f)
 
-qa = None  # initialize
+qa = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    global qa
-    try:
-        print("🔶 Loading RAG pipeline...")
-        qa = get_qa_chain()
-        print("✅ RAG Loaded!")
-    except Exception as e:
-        print("❌ ERROR LOADING RAG:", e)
+    # Skip preloading — qa starts as None, /upload sets it
+    print("🟢 Server started. Upload a document to initialize RAG.")
     yield
-    # Shutdown (add cleanup here if needed)
 
 app = FastAPI(lifespan=lifespan)
 
@@ -48,9 +41,10 @@ def home():
 @app.post("/ask")
 def ask(request: QuestionRequest):
     if qa is None:
-        raise HTTPException(status_code=503, detail="RAG not loaded")
+        raise HTTPException(status_code=503, detail="RAG not loaded. Please upload a document first.")
     try:
-        answer = qa.run(request.question)
+        result = qa.invoke({"input": request.question})  # updated from qa.run()
+        answer = result["answer"]
         return {"question": request.question, "answer": answer}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -58,19 +52,13 @@ def ask(request: QuestionRequest):
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     global qa
-
     try:
-        # Save file
+        os.makedirs("dataset", exist_ok=True)  # create folder if missing
         save_path = f"dataset/{file.filename}"
-
         with open(save_path, "wb") as f:
             f.write(await file.read())
-
-        # 🔥 IMPORTANT LINE
         qa = get_qa_chain(save_path)
-
         return {"message": "File uploaded & processed successfully"}
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -79,12 +67,8 @@ def signup(user: UserCredentials):
     users = load_users()
     if user.username in users:
         raise HTTPException(status_code=400, detail="Username already exists")
-    
-    # NOTE: Storing plain text passwords for simplicity in this mini-project.
-    # In a real application, you MUST hash passwords using bcrypt or argon2!
     users[user.username] = {"password": user.password}
     save_users(users)
-    
     return {"message": "User registered successfully"}
 
 @app.post("/login")
@@ -92,6 +76,4 @@ def login(user: UserCredentials):
     users = load_users()
     if user.username not in users or users[user.username]["password"] != user.password:
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    
-    # Return a token or success message. Streamlit will just track success in session state.
     return {"message": "Login successful", "username": user.username}
