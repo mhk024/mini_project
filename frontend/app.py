@@ -107,7 +107,7 @@ with st.sidebar:
         st.session_state.loaded_file = ""
 
     if selected and st.button("Load File"):
-        res = requests.post(SET_FILE_URL, json={"filename": selected}, timeout=300)
+        res = requests.post(SET_FILE_URL, json={"filename": selected}, timeout=600)
         if res.status_code == 200:
             st.session_state.loaded_file = selected
             st.success(f"✅ Loaded: {selected}")
