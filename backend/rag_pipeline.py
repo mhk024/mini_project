@@ -37,9 +37,7 @@ def load_document(file_path):
 # =========================
 # 🧠 CREATE / LOAD VECTOR DB
 # =========================
-import shutil
-
-def create_or_load_db(file_path, persist_dir="chroma_db"):
+def create_or_load_db(file_path):
     documents = load_document(file_path)
 
     splitter = RecursiveCharacterTextSplitter(
@@ -52,14 +50,10 @@ def create_or_load_db(file_path, persist_dir="chroma_db"):
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-    # Always delete old DB and recreate fresh
-    if os.path.exists(persist_dir):
-        shutil.rmtree(persist_dir)
-
+    # Run Chroma entirely in memory to avoid Windows file locks (WinError 32)
     db = Chroma.from_documents(
         docs,
-        embeddings,
-        persist_directory=persist_dir
+        embeddings
     )
 
     return db

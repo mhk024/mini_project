@@ -62,6 +62,8 @@ app = FastAPI(lifespan=lifespan)
 class QuestionRequest(BaseModel):
     username: str
     question: str
+    filename: str = None
+    session_id: str = None
 
 class FilenameRequest(BaseModel):
     filename: str
@@ -99,10 +101,38 @@ def ask(request: QuestionRequest):
 
         # Save history
         history = load_history()
-        history.setdefault(request.username, [])
+        
+        # Legacy migration: if it's a list, convert to session dict
+        user_data = history.get(request.username)
+        if isinstance(user_data, list):
+            history[request.username] = {
+                "legacy_session": {
+                    "title": "Legacy Chat",
+                    "messages": user_data
+                }
+            }
+        elif user_data is None:
+            history[request.username] = {}
 
-        history[request.username].append({"role": "user", "content": request.question})
-        history[request.username].append({"role": "assistant", "content": answer})
+        user_history = history[request.username]
+        sess_id = request.session_id or "default"
+
+        if sess_id not in user_history:
+            user_history[sess_id] = {
+                "title": request.question[:30] + "..." if len(request.question) > 30 else request.question,
+                "messages": []
+            }
+        
+        user_history[sess_id]["messages"].append({
+            "role": "user", 
+            "content": request.question,
+            "filename": request.filename
+        })
+        user_history[sess_id]["messages"].append({
+            "role": "assistant", 
+            "content": answer,
+            "filename": request.filename
+        })
 
         save_history(history)
 
@@ -229,7 +259,21 @@ def login(user: UserCredentials):
 @app.get("/history/{username}")
 def get_history(username: str):
     history = load_history()
-    return {"history": history.get(username, [])}
+    user_data = history.get(username, {})
+    
+    # Handle legacy format where history was just an array
+    if isinstance(user_data, list):
+        if len(user_data) > 0:
+            user_data = {
+                "legacy_session": {
+                    "title": "Legacy Chat",
+                    "messages": user_data
+                }
+            }
+        else:
+            user_data = {}
+
+    return {"history": user_data}
 
 
 # =========================
