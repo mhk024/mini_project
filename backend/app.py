@@ -94,12 +94,13 @@ def ask(request: QuestionRequest):
     try:
         print("🔥 Question:", request.question)
 
-        # ✅ FIXED
-        answer = qa(request.question)
+        # Run full RAG pipeline (returns structured dict)
+        result = qa(request.question)
 
+        answer = result["answer"]
         print("✅ Answer:", answer)
 
-        # Save history
+        # Save history (store only the final answer text)
         history = load_history()
         
         # Legacy migration: if it's a list, convert to session dict
@@ -136,7 +137,14 @@ def ask(request: QuestionRequest):
 
         save_history(history)
 
-        return {"answer": answer}
+        # Return full pipeline data for ML transparency
+        return {
+            "original_query": result["original_query"],
+            "enhanced_query": result["enhanced_query"],
+            "retrieved_documents": result["retrieved_documents"],
+            "documents": result["reranked_documents"],
+            "answer": answer
+        }
 
     except Exception as e:
         print("❌ ERROR in /ask:", str(e))
