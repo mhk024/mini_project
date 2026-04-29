@@ -11,4 +11,7 @@ sentence-transformers
 pypdf
 streamlit
 requests
+httpx
 pydantic
+numpy
+scikit-learn
