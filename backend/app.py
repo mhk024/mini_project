@@ -8,6 +8,8 @@ import os
 import sys
 import time
 import logging
+from dotenv import load_dotenv
+load_dotenv()
 
 # Directory for uploaded and processed files. Render's slug is read‑only, so use a writable path.
 DATASET_DIR = os.getenv("DATASET_DIR", os.path.join(os.getenv("TMPDIR", "/tmp"), "dataset"))
@@ -134,27 +136,22 @@ async def health():
         },
     }
 
-
 @app.post("/ask")
 async def ask(request: QuestionRequest):
     start_time = time.time()
     try:
         if request.filename:
             await _load_context_async(request.filename)
-
         if not state.qa_chain:
             raise HTTPException(status_code=503, detail="Context not loaded")
-
         ckey = f"ask:{request.filename}:{request.question}:{request.mode}"
         cached = await cache_manager.get(ckey, category="rag_chat")
         if cached:
             cached["cache_hit"] = True
             return cached
-
         result = await state.qa_chain(request.question, mode=request.mode)
         result["execution_time_ms"] = round((time.time() - start_time) * 1000, 2)
         result["cache_hit"] = False
-
         await cache_manager.set(ckey, result, category="rag_chat")
         return result
     except HTTPException:

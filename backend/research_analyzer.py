@@ -206,10 +206,7 @@ async def run_full_pipeline(
     # Run Academic Intelligence (External APIs)
     academic_task = run_full_academic_analysis_async(document_text)
     
-    # Run LLM Analysis (Ollama)
-    # We pass the academic results to the LLM analysis once they are ready,
-    # OR we run them in parallel if they don't depend on each other.
-    # Here, Unified Analysis can benefit from Similar Papers.
+    # Run LLM Analysis (Groq) – unified analysis with similar papers
     
     # First, get academic data (similarity, trends)
     academic_data = await run_with_timeout(academic_task, 25, fallback_value={})

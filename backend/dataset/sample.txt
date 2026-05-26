@@ -1,0 +1,1 @@
+This is a sample document for RAG testing. It contains information about artificial intelligence and its applications.
