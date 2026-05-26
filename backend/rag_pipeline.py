@@ -5,10 +5,10 @@ RAG pipeline — all heavy dependencies are lazy-loaded via services.resource_ma
 from __future__ import annotations
 
 import os
-import re
+import hashlib
 import asyncio
 import logging
-import hashlib
+import numpy as np
 from typing import List, Dict, Any
 
 from langchain_core.prompts import PromptTemplate
@@ -69,10 +69,8 @@ def create_or_load_db(file_path: str):
 
     logger.info("Building new Chroma index for %s", file_path)
     documents = load_document(file_path)
-    documents = load_document(file_path)
     splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=120)
     docs = splitter.split_documents(documents)
-    # Deduplicate chunks before persisting
     docs = _deduplicate_chunks(docs)
 
     os.makedirs(persist_dir, exist_ok=True)
@@ -86,7 +84,6 @@ def create_or_load_db(file_path: str):
 
 
 def _jaccard_similarity(text_a: str, text_b: str) -> float:
-    """Compute Jaccard similarity between two texts based on word sets."""
     set_a = set(text_a.lower().split())
     set_b = set(text_b.lower().split())
     if not set_a and not set_b:
@@ -98,35 +95,22 @@ def _jaccard_similarity(text_a: str, text_b: str) -> float:
 
 def _deduplicate_chunks(chunks: List[Any]) -> List[Any]:
     """Remove near‑duplicate chunks based on Jaccard similarity.
-
     Chunks are kept in order; a chunk is discarded if its content is
     similar (≥ threshold) to any previously kept chunk.
     """
     deduped: List[Any] = []
     for chunk in chunks:
-        content = getattr(chunk, "page_content", "")
-        if any(_jaccard_similarity(content, getattr(c, "page_content", "")) >= DUPLICATE_JACCARD_THRESHOLD for c in deduped):
-            continue
-        deduped.append(chunk)
+        duplicate = False
+        for kept in deduped:
+            if _jaccard_similarity(chunk.page_content, kept.page_content) >= DUPLICATE_JACCARD_THRESHOLD:
+                duplicate = True
+                break
+        if not duplicate:
+            deduped.append(chunk)
     return deduped
-    encoder = get_cross_encoder()
-    pairs = [(query, d.page_content) for d in documents]
-    scores = encoder.predict(pairs)
-    scored = []
-    for doc, score in zip(documents, scores):
-        scored.append({
-            "content": doc.page_content,
-            "score": float(score),
-            "source": os.path.basename(doc.metadata.get("source", "unknown")),
-        })
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    return scored
 
 
 def _rerank_with_embeddings(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
-    """Lightweight rerank using the same embedding model (no extra torch model)."""
-    import numpy as np
-
     embeddings = get_embeddings()
     texts = [d.page_content for d in documents]
     vectors = embeddings.embed_documents([query] + texts)
@@ -148,8 +132,6 @@ def _rerank_with_embeddings(query: str, documents: List[Any]) -> List[Dict[str, 
 def rerank_documents(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
     if not documents:
         return []
-    if get_cross_encoder() is not None:
-        return _rerank_with_cross_encoder(query, documents)
     return _rerank_with_embeddings(query, documents)
 
 
@@ -180,31 +162,25 @@ def build_rag_chain(db):
     llm = get_llm()
 
     async def rag_chain(question: str, mode: str = "student") -> Dict[str, Any]:
-        enhanced_task = asyncio.create_task(enhance_query_async(llm, question))
-        raw_docs = await asyncio.to_thread(db.similarity_search, question, k=RETRIEVAL_RAW_K)
-        # Apply deduplication to retrieved chunks
-        deduped = _deduplicate_chunks(raw_docs)
-        # Keep top N after deduplication
-        raw_docs = deduped[:RETREIVAL_KEEP_K] if len(deduped) > RETRIEVAL_KEEP_K else deduped
-        enhanced_query = await enhanced_task
-
-        reranked = await asyncio.to_thread(rerank_documents, enhanced_query, raw_docs)
-        context = "\n\n".join([d["content"] for d in reranked[:3]])
-
-        answer = await llm.ainvoke(_QA_PROMPT.format(context=context, question=question))
-
-        result = {
-            "original_query": question,
-            "enhanced_query": enhanced_query,
-            "answer": answer.strip(),
-            "retrieved_documents": reranked,
-            "reranked_documents": reranked,
-        }
-
-        if mode == "student":
+        try:
+            enhanced_q = await enhance_query_async(llm, question)
+            raw_docs = await asyncio.to_thread(db.similarity_search, enhanced_q, k=RETRIEVAL_RAW_K)
+            deduped = _deduplicate_chunks(raw_docs)
+            reranked = rerank_documents(enhanced_q, deduped[:RETRIEVAL_KEEP_K])
+            context = "\n\n".join([r["content"] for r in reranked])
+            answer = await llm.ainvoke(_QA_PROMPT.format(context=context, question=question))
             summary = await generate_summary_async(llm, context)
-            result.update({"summary": summary, "key_points": [], "simplified_explanation": ""})
-
-        return result
+            return {
+                "answer": answer.content if hasattr(answer, "content") else str(answer),
+                "summary": summary,
+                "sources": [r["source"] for r in reranked],
+            }
+        except Exception as e:
+            logger.exception("Error in rag_chain for question %s", question)
+            return {
+                "answer": "An error occurred.",
+                "summary": {"short": "Error", "detailed": "Error"},
+                "sources": [],
+            }
 
     return rag_chain

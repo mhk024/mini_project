@@ -72,8 +72,12 @@ async def _load_context_async(filename: str):
         from rag_pipeline import create_or_load_db, build_rag_chain
 
         db = await asyncio.to_thread(create_or_load_db, file_path)
-        qa = await asyncio.to_thread(build_rag_chain, db)
-
+        try:
+            qa = await asyncio.to_thread(build_rag_chain, db)
+        except Exception as e:
+            logger.error("Failed to initialize LLM or RAG chain: %s", e)
+            raise HTTPException(status_code=500, detail="LLM initialization error")
+        
         state.loaded_contexts[filename] = {"db": db, "qa": qa}
         _evict_contexts_if_needed()
         state.vector_db = db
@@ -138,6 +142,7 @@ async def health():
 
 @app.post("/ask")
 async def ask(request: QuestionRequest):
+    logger.info("Entry /ask: %s", request)
     start_time = time.time()
     try:
         if request.filename:
@@ -153,6 +158,7 @@ async def ask(request: QuestionRequest):
         result["execution_time_ms"] = round((time.time() - start_time) * 1000, 2)
         result["cache_hit"] = False
         await cache_manager.set(ckey, result, category="rag_chat")
+        logger.info("Result /ask: %s", result)
         return result
     except HTTPException:
         raise
@@ -163,6 +169,7 @@ async def ask(request: QuestionRequest):
 
 @app.post("/evaluate")
 async def evaluate_endpoint(request: EvaluateRequest):
+    logger.info("Entry /evaluate: %s", request)
     try:
         await _load_context_async(request.filename)
         from evaluator import run_full_evaluation

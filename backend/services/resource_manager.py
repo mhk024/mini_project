@@ -12,7 +12,7 @@ import threading
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
-
+from langchain_groq import ChatGroq
 # ---------- Configuration ----------
 USE_FASTEMBED = os.getenv("USE_FASTEMBED", "true").lower() in ("1", "true", "yes")
 EMBEDDING_MODEL = os.getenv(
@@ -54,6 +54,7 @@ def get_embeddings() -> Any:
         return _embeddings
 
 # ---------- LLM (Groq) ----------
+
 def get_llm() -> Any:
     """Singleton Groq LLM client (created on first request)."""
     global _llm
@@ -78,8 +79,6 @@ def get_llm() -> Any:
             max_tokens=GROQ_MAX_TOKENS,
         )
         return _llm
-
-# ---------- Cross‑encoder (optional) ----------
 def get_cross_encoder() -> Optional[Any]:
     """Optional cross‑encoder reranker (~80–120 MB). Disabled by default on Render.
     Returns None when USE_CROSS_ENCODER is false.
