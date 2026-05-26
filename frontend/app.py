@@ -27,7 +27,7 @@ import os
 # 🔗  API URLs
 # ─────────────────────────────────────────────────────────────
 
-BASE = os.getenv("API_URL")
+BASE = os.getenv("API_URL", "").rstrip('/')
 API_URL       = f"{BASE}/ask"
 UPLOAD_URL    = f"{BASE}/upload"
 LOGIN_URL     = f"{BASE}/login"

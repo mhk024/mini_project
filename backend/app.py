@@ -8,6 +8,9 @@ import os
 import sys
 import time
 import logging
+
+# Directory for uploaded and processed files. Render's slug is read‑only, so use a writable path.
+DATASET_DIR = os.getenv("DATASET_DIR", os.path.join(os.getenv("TMPDIR", "/tmp"), "dataset"))
 import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
@@ -206,7 +209,7 @@ async def analyze_paper_endpoint(request: AnalyzePaperRequest):
 @app.post("/set_file")
 async def set_file(request: SetFileRequest):
     logger.info("Loading file context: %s", request.filename)
-    file_path = os.path.join("dataset", request.filename)
+    file_path = os.path.join(DATASET_DIR, request.filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail=f"File not found: {request.filename}")
 
@@ -217,8 +220,8 @@ async def set_file(request: SetFileRequest):
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     try:
-        os.makedirs("dataset", exist_ok=True)
-        file_path = os.path.join("dataset", file.filename)
+        os.makedirs(DATASET_DIR, exist_ok=True)
+        file_path = os.path.join(DATASET_DIR, file.filename)
         content = await file.read()
         with open(file_path, "wb") as f:
             f.write(content)
@@ -234,7 +237,7 @@ async def upload_file(file: UploadFile = File(...)):
 
 @app.get("/files")
 async def list_files():
-    dataset_path = "dataset"
+    dataset_path = DATASET_DIR
     if not os.path.isdir(dataset_path):
         return {"files": []}
     files = [
