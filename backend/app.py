@@ -126,7 +126,7 @@ async def health():
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
         "services": {
-            "ollama": os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
+            "groq": os.getenv("GROQ_API_KEY", "not_set"),
             "rag": "ready" if state.qa_chain else "idle",
             "cache": "active",
             "loaded_contexts": len(state.loaded_contexts),

@@ -27,8 +27,7 @@ services:
         value: "1"
       - key: TOKENIZERS_PARALLELISM
         value: "false"
-      # Point to external Ollama or compatible API (Render cannot run Ollama in 512MB)
-      - key: OLLAMA_BASE_URL
+      # Groq API configuration
+      - key: GROQ_API_KEY
         sync: false
-      - key: OLLAMA_MODEL
-        value: phi
+        # Set this in Render environment variables
