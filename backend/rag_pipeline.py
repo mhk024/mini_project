@@ -18,6 +18,7 @@ from services.resource_manager import (
     get_cross_encoder,
     CHROMA_PERSIST_DIR,
 )
+from config import DUPLICATE_JACCARD_THRESHOLD, RETRIEVAL_RAW_K, RETRIEVAL_KEEP_K
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 logger = logging.getLogger(__name__)
@@ -68,8 +69,11 @@ def create_or_load_db(file_path: str):
 
     logger.info("Building new Chroma index for %s", file_path)
     documents = load_document(file_path)
+    documents = load_document(file_path)
     splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=120)
     docs = splitter.split_documents(documents)
+    # Deduplicate chunks before persisting
+    docs = _deduplicate_chunks(docs)
 
     os.makedirs(persist_dir, exist_ok=True)
     db = Chroma.from_documents(
@@ -81,7 +85,30 @@ def create_or_load_db(file_path: str):
     return db
 
 
-def _rerank_with_cross_encoder(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
+def _jaccard_similarity(text_a: str, text_b: str) -> float:
+    """Compute Jaccard similarity between two texts based on word sets."""
+    set_a = set(text_a.lower().split())
+    set_b = set(text_b.lower().split())
+    if not set_a and not set_b:
+        return 1.0
+    intersection = set_a.intersection(set_b)
+    union = set_a.union(set_b)
+    return float(len(intersection) / len(union))
+
+
+def _deduplicate_chunks(chunks: List[Any]) -> List[Any]:
+    """Remove near‑duplicate chunks based on Jaccard similarity.
+
+    Chunks are kept in order; a chunk is discarded if its content is
+    similar (≥ threshold) to any previously kept chunk.
+    """
+    deduped: List[Any] = []
+    for chunk in chunks:
+        content = getattr(chunk, "page_content", "")
+        if any(_jaccard_similarity(content, getattr(c, "page_content", "")) >= DUPLICATE_JACCARD_THRESHOLD for c in deduped):
+            continue
+        deduped.append(chunk)
+    return deduped
     encoder = get_cross_encoder()
     pairs = [(query, d.page_content) for d in documents]
     scores = encoder.predict(pairs)
@@ -154,7 +181,11 @@ def build_rag_chain(db):
 
     async def rag_chain(question: str, mode: str = "student") -> Dict[str, Any]:
         enhanced_task = asyncio.create_task(enhance_query_async(llm, question))
-        raw_docs = await asyncio.to_thread(db.similarity_search, question, k=5)
+        raw_docs = await asyncio.to_thread(db.similarity_search, question, k=RETRIEVAL_RAW_K)
+        # Apply deduplication to retrieved chunks
+        deduped = _deduplicate_chunks(raw_docs)
+        # Keep top N after deduplication
+        raw_docs = deduped[:RETREIVAL_KEEP_K] if len(deduped) > RETRIEVAL_KEEP_K else deduped
         enhanced_query = await enhanced_task
 
         reranked = await asyncio.to_thread(rerank_documents, enhanced_query, raw_docs)
