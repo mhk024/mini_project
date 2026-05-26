@@ -1,4 +1,4 @@
-'''config.py
+'''config.py'''
 """Configuration constants for RAG Research Assistant"""
 
 # Jaccard similarity threshold for chunk deduplication (0.0-1.0)
