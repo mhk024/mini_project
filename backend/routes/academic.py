@@ -42,14 +42,15 @@ class PerQuestionEvaluationRequest(BaseModel):
 # 🔧  SHARED HELPER
 # ─────────────────────────────────────────────
 async def _get_document_text_async(filename: Optional[str] = None) -> str:
-    # Try global db first
     try:
         from research_analyzer import get_document_text
-        import app
-        if app.vector_db is not None:
-            text = await asyncio.to_thread(get_document_text, app.vector_db, max_chars=5000)
-            if text: return text
-    except:
+        import state
+
+        if state.vector_db is not None:
+            text = await asyncio.to_thread(get_document_text, state.vector_db, max_chars=5000)
+            if text:
+                return text
+    except Exception:
         pass
 
     if not filename:
@@ -144,10 +145,10 @@ async def full_analysis_endpoint(request: AnalysisRequest):
 @router.post("/evaluate-questions")
 async def evaluate_questions_endpoint(request: PerQuestionEvaluationRequest):
     try:
-        import app
         from research_analyzer import evaluate_per_question_async
-        
-        llm = app._get_llm()
+        from services.resource_manager import get_llm
+
+        llm = get_llm()
         text = await _get_document_text_async(request.filename)
         
         result = await evaluate_per_question_async(

@@ -1,120 +1,121 @@
+"""
+FastAPI backend — cold start stays light: no torch / embeddings / chroma at import time.
+"""
+
+from __future__ import annotations
+
 import os
 import sys
 import time
-import uuid
-import json
-import re
-import hashlib
 import logging
 import asyncio
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from langchain_ollama import OllamaLLM
-from rag_pipeline import create_or_load_db, build_rag_chain
-from research_analyzer import run_full_pipeline, get_document_text
 from services.cache_manager import cache_manager
-from services.async_utils import run_with_timeout
 from routes.academic import router as academic_router
-import evaluator
+from services.resource_manager import get_llm
+import state
 
-# Environment fixes
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-os.environ["OMP_NUM_THREADS"] = "1"
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
-# Logging setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Windows encoding fix
 if sys.platform == "win32":
     try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
         pass
 
-# Globals
-qa_chain = None
-vector_db = None
-analyzer_llm = None
-loaded_contexts = {} # filename -> {"db": db, "qa": qa}
+_context_lock = asyncio.Lock()
 
-# =========================
-# 📦 HELPERS
-# =========================
-def _get_llm():
-    global analyzer_llm
-    if analyzer_llm is None:
-        analyzer_llm = OllamaLLM(model="phi", num_predict=2048)
-    return analyzer_llm
+
+def _evict_contexts_if_needed():
+    while len(state.loaded_contexts) > state.MAX_LOADED_CONTEXTS:
+        evicted_name, _ = state.loaded_contexts.popitem(last=False)
+        logger.info("Evicted context for %s (max=%s)", evicted_name, state.MAX_LOADED_CONTEXTS)
+
 
 async def _load_context_async(filename: str):
-    global qa_chain, vector_db
-    if filename in loaded_contexts:
-        vector_db = loaded_contexts[filename]["db"]
-        qa_chain  = loaded_contexts[filename]["qa"]
+    """Load vector DB + RAG chain on demand (thread pool for CPU/IO heavy work)."""
+    if filename in state.loaded_contexts:
+        ctx = state.loaded_contexts[filename]
+        state.loaded_contexts.move_to_end(filename)
+        state.vector_db = ctx["db"]
+        state.qa_chain = ctx["qa"]
         return
 
     file_path = os.path.join("dataset", filename)
     if not os.path.exists(file_path):
-        raise HTTPException(404, "File not found")
-    
-    # Run heavy DB creation in a thread to not block
-    db = await asyncio.to_thread(create_or_load_db, file_path)
-    qa = await asyncio.to_thread(build_rag_chain, db)
-    
-    loaded_contexts[filename] = {"db": db, "qa": qa}
-    vector_db = db
-    qa_chain = qa
+        raise HTTPException(status_code=404, detail="File not found")
 
-# =========================
-# 🚀 APP LIFECYCLE
-# =========================
+    async with _context_lock:
+        if filename in state.loaded_contexts:
+            ctx = state.loaded_contexts[filename]
+            state.vector_db = ctx["db"]
+            state.qa_chain = ctx["qa"]
+            return
+
+        from rag_pipeline import create_or_load_db, build_rag_chain
+
+        db = await asyncio.to_thread(create_or_load_db, file_path)
+        qa = await asyncio.to_thread(build_rag_chain, db)
+
+        state.loaded_contexts[filename] = {"db": db, "qa": qa}
+        _evict_contexts_if_needed()
+        state.vector_db = db
+        state.qa_chain = qa
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🟢 Research Assistant Pipeline Online")
+    logger.info("Research Assistant API starting (lazy-load mode)")
+    for route in app.routes:
+        if hasattr(route, "methods"):
+            logger.info("Route: %s methods: %s", route.path, route.methods)
     yield
-    logger.info("🔴 Pipeline Offline")
+    logger.info("Research Assistant API shutting down")
+
 
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-
-# Include Routers
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(academic_router, prefix="/academic")
 
-@app.on_event("startup")
-async def list_routes():
-    for route in app.routes:
-        logger.info(f"Route: {route.path} methods: {route.methods}")
 
-# =========================
-# 📥 MODELS
-# =========================
 class QuestionRequest(BaseModel):
     username: str
     question: str
-    filename: str = None
+    filename: str | None = None
     mode: str = "student"
+
 
 class AnalyzePaperRequest(BaseModel):
     filename: str
     reference_text: str = ""
 
+
 class EvaluateRequest(BaseModel):
     filename: str
-    questions: list = None
+    questions: list | None = None
     mode: str = "quick"
+
 
 class SetFileRequest(BaseModel):
     filename: str
 
-# =========================
-# 🏠 ENDPOINTS
-# =========================
 
 @app.get("/health")
 async def health():
@@ -122,105 +123,96 @@ async def health():
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
         "services": {
-            "ollama": "running",
-            "rag": "ready" if qa_chain else "idle",
-            "cache": "active"
-        }
+            "ollama": os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
+            "rag": "ready" if state.qa_chain else "idle",
+            "cache": "active",
+            "loaded_contexts": len(state.loaded_contexts),
+            "max_contexts": state.MAX_LOADED_CONTEXTS,
+        },
     }
+
 
 @app.post("/ask")
 async def ask(request: QuestionRequest):
-    global qa_chain
     start_time = time.time()
-    
     try:
         if request.filename:
             await _load_context_async(request.filename)
-        
-        if not qa_chain:
-            raise HTTPException(503, "Context not loaded")
 
-        # Check Cache
+        if not state.qa_chain:
+            raise HTTPException(status_code=503, detail="Context not loaded")
+
         ckey = f"ask:{request.filename}:{request.question}:{request.mode}"
         cached = await cache_manager.get(ckey, category="rag_chat")
         if cached:
             cached["cache_hit"] = True
             return cached
 
-        # Run RAG async
-        result = await qa_chain(request.question, mode=request.mode)
-        
-        elapsed = round((time.time() - start_time) * 1000, 2)
-        result["execution_time_ms"] = elapsed
+        result = await state.qa_chain(request.question, mode=request.mode)
+        result["execution_time_ms"] = round((time.time() - start_time) * 1000, 2)
         result["cache_hit"] = False
-        
+
         await cache_manager.set(ckey, result, category="rag_chat")
         return result
-
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error in /ask: {e}")
-        raise HTTPException(500, str(e))
+        logger.error("Error in /ask: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
 
 @app.post("/evaluate")
 async def evaluate_endpoint(request: EvaluateRequest):
     try:
         await _load_context_async(request.filename)
-        llm = _get_llm()
-        
-        # We need a list of files for dataset info
-        uploaded_files = [request.filename]
-        
-        result = await evaluator.run_full_evaluation(
-            llm=llm,
-            rag_chain=qa_chain,
-            db=vector_db,
-            uploaded_files=uploaded_files,
-            mode=request.mode
+        from evaluator import run_full_evaluation
+
+        result = await run_full_evaluation(
+            llm=get_llm(),
+            rag_chain=state.qa_chain,
+            db=state.vector_db,
+            uploaded_files=[request.filename],
+            mode=request.mode,
         )
         return result
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Evaluation error: {e}")
-        raise HTTPException(500, str(e))
+        logger.error("Evaluation error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
 
 @app.post("/analyze/paper")
 async def analyze_paper_endpoint(request: AnalyzePaperRequest):
     try:
         await _load_context_async(request.filename)
-        text = await asyncio.to_thread(get_document_text, vector_db)
-        
+        from research_analyzer import run_full_pipeline, get_document_text
+
+        text = await asyncio.to_thread(get_document_text, state.vector_db)
         if not text:
             return {"status": "error", "message": "Could not extract text"}
 
-        # Run full pipeline (Parallel APIs + Parallel LLM)
-        llm = _get_llm()
-        result = await run_full_pipeline(llm, text, reference_text=request.reference_text)
+        result = await run_full_pipeline(
+            get_llm(), text, reference_text=request.reference_text
+        )
         return result
-
-    except Exception as e:
-        logger.error(f"Analysis error: {e}")
-        raise HTTPException(500, str(e))
-
-@app.post("/set_file")
-async def set_file(request: SetFileRequest):
-    logger.info(f"📥 Received request to load file: {request.filename}")
-    try:
-        # Validate file exists
-        file_path = os.path.join("dataset", request.filename)
-        if not os.path.exists(file_path):
-            logger.error(f"❌ File not found in dataset: {file_path}")
-            raise HTTPException(status_code=404, detail=f"File not found: {request.filename}")
-            
-        # Load context
-        logger.info(f"⏳ Loading context for {request.filename}...")
-        await _load_context_async(request.filename)
-        logger.info(f"✅ Context loaded successfully for {request.filename}")
-        
-        return {"message": "Success", "filename": request.filename}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Error in /set_file for {request.filename}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Analysis error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/set_file")
+async def set_file(request: SetFileRequest):
+    logger.info("Loading file context: %s", request.filename)
+    file_path = os.path.join("dataset", request.filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"File not found: {request.filename}")
+
+    await _load_context_async(request.filename)
+    return {"message": "Success", "filename": request.filename}
+
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -228,42 +220,53 @@ async def upload_file(file: UploadFile = File(...)):
         os.makedirs("dataset", exist_ok=True)
         file_path = os.path.join("dataset", file.filename)
         content = await file.read()
-        
         with open(file_path, "wb") as f:
             f.write(content)
-            
-        # Background: preload context
-        await _load_context_async(file.filename)
+
+        if os.getenv("PRELOAD_ON_UPLOAD", "false").lower() in ("1", "true", "yes"):
+            await _load_context_async(file.filename)
+
         return {"message": "Success", "filename": file.filename}
     except Exception as e:
-        logger.error(f"Upload error: {e}")
-        raise HTTPException(500, str(e))
+        logger.error("Upload error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
 
 @app.get("/files")
 async def list_files():
-    try:
-        dataset_path = os.path.join("dataset")
-        if not os.path.isdir(dataset_path):
-            return {"files": []}
-        files = [
-            f for f in os.listdir(dataset_path)
-            if os.path.isfile(os.path.join(dataset_path, f))
-        ]
-        logger.info(f"📄 Files endpoint returned {len(files)} items")
-        return {"files": files}
-    except Exception as e:
-        logger.error(f"Files endpoint error: {e}")
-        raise HTTPException(500, str(e))
+    dataset_path = "dataset"
+    if not os.path.isdir(dataset_path):
+        return {"files": []}
+    files = [
+        f
+        for f in os.listdir(dataset_path)
+        if os.path.isfile(os.path.join(dataset_path, f))
+    ]
+    return {"files": files}
+
 
 @app.get("/history/{username}")
 async def get_history(username: str):
-    # Simplified history fetch from cache or state
     return {"history": []}
+
 
 @app.post("/login")
 async def login(creds: dict):
     return {"status": "success", "username": creds.get("username")}
 
+
+def __getattr__(name: str):
+    """Backward compatibility for `import app` in route modules."""
+    if name == "vector_db":
+        return state.vector_db
+    if name == "qa_chain":
+        return state.qa_chain
+    if name == "_get_llm":
+        return get_llm
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

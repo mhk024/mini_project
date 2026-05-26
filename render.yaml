@@ -1,0 +1,34 @@
+# Render Blueprint — backend only (Streamlit = separate Web Service)
+services:
+  - type: web
+    name: research-assistant-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r ../requirements.txt
+    startCommand: >-
+      uvicorn app:app
+      --host 0.0.0.0
+      --port $PORT
+      --workers 1
+      --timeout-keep-alive 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: USE_FASTEMBED
+        value: "true"
+      - key: USE_CROSS_ENCODER
+        value: "false"
+      - key: RAG_MAX_CONTEXTS
+        value: "1"
+      - key: PRELOAD_ON_UPLOAD
+        value: "false"
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: TOKENIZERS_PARALLELISM
+        value: "false"
+      # Point to external Ollama or compatible API (Render cannot run Ollama in 512MB)
+      - key: OLLAMA_BASE_URL
+        sync: false
+      - key: OLLAMA_MODEL
+        value: phi

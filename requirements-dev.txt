@@ -1,0 +1,7 @@
+-r requirements.txt
+langchain-huggingface>=0.0.3
+sentence-transformers>=2.6.0
+scikit-learn>=1.4.0
+# CPU-only PyTorch (still heavy — use only for local dev)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.2.0
