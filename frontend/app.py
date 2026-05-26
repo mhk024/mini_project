@@ -21,11 +21,13 @@ import time
 import uuid
 import plotly.graph_objects as go
 import plotly.express as px
+import os
 
 # ─────────────────────────────────────────────────────────────
 # 🔗  API URLs
 # ─────────────────────────────────────────────────────────────
-BASE          = "http://127.0.0.1:8000"
+
+BASE = os.getenv("API_URL")
 API_URL       = f"{BASE}/ask"
 UPLOAD_URL    = f"{BASE}/upload"
 LOGIN_URL     = f"{BASE}/login"
