@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from services.academic_intelligence import (
     run_full_academic_analysis_async,
     extract_paper_metadata,
+    extract_research_topic,
     compute_enhanced_quality,
     compute_novelty_score,
     get_domain_aware_trends_async,
@@ -81,10 +82,11 @@ async def _get_document_text_async(filename: Optional[str] = None) -> str:
 async def similar_papers_endpoint(request: AnalysisRequest):
     try:
         text = await _get_document_text_async(request.filename)
+        topic_data = extract_research_topic(text)
+        title = request.query or topic_data.get("semantic_query") or topic_data.get("title", "")
         metadata = extract_paper_metadata(text)
-        title = request.query or metadata.get("title", "")
-        
-        # Parallel fetch
+
+        # Parallel fetch using semantic query for precision
         ss_task = get_similar_papers(title, metadata.get("abstract", ""), limit=10)
         oa_task = search_works(title, limit=10)
         
@@ -102,8 +104,9 @@ async def similar_papers_endpoint(request: AnalysisRequest):
 async def quality_index_endpoint(request: AnalysisRequest):
     try:
         text = await _get_document_text_async(request.filename)
+        topic_data = extract_research_topic(text)
+        title = request.query or topic_data.get("semantic_query") or topic_data.get("title", "")
         metadata = extract_paper_metadata(text)
-        title = request.query or metadata.get("title", "")
         
         ss_papers = await get_similar_papers(title, metadata.get("abstract", ""), limit=5)
         oa_works = await search_works(title, limit=5)
@@ -120,8 +123,8 @@ async def quality_index_endpoint(request: AnalysisRequest):
 async def trends_endpoint(request: AnalysisRequest):
     try:
         text = await _get_document_text_async(request.filename)
-        metadata = extract_paper_metadata(text)
-        keyword = request.query or (metadata.get("keywords") or [""])[0] or metadata.get("title", "")
+        topic_data = extract_research_topic(text)
+        keyword = request.query or topic_data.get("semantic_query", "")
         
         trends_task = get_domain_aware_trends_async(keyword)
         concepts_task = get_related_concepts(keyword, limit=8)

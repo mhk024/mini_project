@@ -19,11 +19,12 @@ import hashlib
 import logging
 import asyncio
 import math
+from collections import Counter
 from datetime import datetime
 from typing import Optional
 
 from services.semantic_scholar import get_influential_papers
-from services.openalex import get_related_concepts
+from services.openalex import get_related_concepts, get_topic_trends
 from services.academic_search import search_semantic_scholar, search_openalex
 from services.cache_manager import cache_manager
 from services.async_utils import run_with_timeout
@@ -57,6 +58,7 @@ TOPIC_STOPWORDS = {
     "approach", "method", "analysis", "results", "based", "between", "within", "their",
     "our", "its", "also", "such", "more", "most", "than", "over", "article", "authors",
 }
+MAX_QUERY_LENGTH = 120
 
 DOMAIN_SUBDOMAINS = {
     "artificial intelligence": ["Machine Learning", "Deep Learning", "Natural Language Processing", "Computer Vision", "Reinforcement Learning"],
@@ -239,33 +241,137 @@ def _extract_title_candidates(document_text: str) -> list[str]:
     return [c[1] for c in candidates[:5]]
 
 
-def extract_research_topic(document_text: str) -> str:
-    metadata = extract_paper_metadata(document_text)
+def _remove_duplicate_lines(lines: list[str]) -> list[str]:
+    unique = []
+    seen = set()
+    for line in lines:
+        key = re.sub(r"\s+", " ", line.strip().lower())
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(line.strip())
+    return unique
+
+
+def _clean_document_for_topic_extraction(document_text: str) -> str:
+    raw = document_text or ""
+    # Ignore references/bibliography section to avoid noisy query terms.
+    refs_match = re.search(r"(^|\n)\s*(references|bibliography)\s*($|\n)", raw, re.IGNORECASE)
+    if refs_match:
+        raw = raw[: refs_match.start()]
+
+    raw = re.sub(r"[^\x09\x0A\x0D\x20-\x7E]", " ", raw)
+    lines = [l.strip() for l in raw.splitlines() if l and l.strip()]
+    lines = _remove_duplicate_lines(lines)
+
+    noise_patterns = NOISE_LINE_PATTERNS + [
+        r"\bopen access article\b",
+        r"\bauthor\b",
+        r"\bcorresponding author\b",
+        r"\bcreativecommons\b",
+        r"\blicense\b",
+        r"\bpreprint\b",
+        r"\barxiv\b",
+        r"\bthis article\b",
+        r"\bdoi\s*[:/]",
+    ]
+    cleaned_lines = []
+    for line in lines:
+        low = line.lower()
+        if any(re.search(p, low) for p in noise_patterns):
+            continue
+        if re.match(r"^\s*(figure|table)\s+\d+", low):
+            continue
+        if len(line) < 3:
+            continue
+        cleaned_lines.append(line)
+    return re.sub(r"\s+", " ", "\n".join(cleaned_lines)).strip()
+
+
+def _extract_keywords(clean_text: str, top_n: int = 8) -> list[str]:
+    keyword_patterns = [
+        r"\b(transformer(?:s)?|attention(?:\s+mechanism)?|llm(?:s)?|large language model(?:s)?)\b",
+        r"\b(convolutional neural network(?:s)?|cnn(?:s)?|rnn(?:s)?|lstm(?:s)?)\b",
+        r"\b(deep learning|machine learning|artificial intelligence|reinforcement learning)\b",
+        r"\b(natural language processing|computer vision|medical imaging|time series)\b",
+        r"\b(classification|segmentation|optimization|generalization|fine[- ]tuning)\b",
+    ]
+    kws = []
+    low = clean_text.lower()
+    for pat in keyword_patterns:
+        kws.extend([m.group(1).strip() for m in re.finditer(pat, low, re.IGNORECASE)])
+
+    words = re.findall(r"\b[a-z][a-z0-9\-]{3,}\b", low)
+    freq = Counter(w for w in words if w not in TOPIC_STOPWORDS and w not in GENERIC_TERMS)
+    for token, _ in freq.most_common(top_n * 3):
+        if token not in kws and len(token) > 3:
+            kws.append(token)
+    dedup = []
+    seen = set()
+    for kw in kws:
+        key = kw.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(kw)
+        if len(dedup) >= top_n:
+            break
+    return dedup
+
+
+def _compress_query(query: str, max_chars: int = MAX_QUERY_LENGTH) -> str:
+    query = clean_search_query(query, max_chars=max_chars * 2)
+    tokens = [t for t in re.findall(r"[A-Za-z][A-Za-z0-9\-]{1,}", query) if t.lower() not in TOPIC_STOPWORDS]
+    compact = []
+    seen = set()
+    for token in tokens:
+        key = token.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        compact.append(token)
+        candidate = " ".join(compact)
+        if len(candidate) > max_chars:
+            compact.pop()
+            break
+    return " ".join(compact)[:max_chars].strip()
+
+
+def extract_research_topic(document_text: str) -> dict:
+    cleaned_text = _clean_document_for_topic_extraction(document_text)
+    metadata = extract_paper_metadata(cleaned_text or document_text)
     title = (metadata.get("title") or "").strip()
     abstract = (metadata.get("abstract") or "").strip()
-    first_para = _extract_first_meaningful_paragraph(document_text)
+    first_para = _extract_first_meaningful_paragraph(cleaned_text or document_text)
 
-    title_candidates = _extract_title_candidates(document_text)
-    candidates = title_candidates + [title, abstract[:180], first_para[:180]]
-    for candidate in candidates:
-        if not candidate:
-            continue
-        # Strip "Abstract:" prefix when present.
-        clean = re.sub(r"^\s*abstract\s*[:\-]?\s*", "", candidate, flags=re.IGNORECASE).strip()
-        if _looks_like_noise_line(clean):
-            continue
-        topic = _clean_topic_phrase(clean, max_words=12)
-        wc = len(topic.split())
-        if topic and 3 <= wc <= 12 and not _is_weak_topic(topic):
-            return topic
+    probable_title = ""
+    for candidate in _extract_title_candidates(cleaned_text or document_text) + [title]:
+        clean = _clean_topic_phrase(re.sub(r"^\s*abstract\s*[:\-]?\s*", "", candidate or "", flags=re.IGNORECASE), max_words=14)
+        if clean and not _is_weak_topic(clean):
+            probable_title = clean
+            break
+    if not probable_title:
+        probable_title = _clean_topic_phrase(title, max_words=12) or "Research topic"
 
-    fallback_keywords = _top_keywords_from_texts([title, abstract, first_para], top_n=5)
-    if fallback_keywords:
-        return _clean_topic_phrase(" ".join(fallback_keywords), max_words=8)
-    return _clean_topic_phrase(title, max_words=10) or "Research topic"
+    keywords = _extract_keywords(" ".join([probable_title, abstract, first_para]), top_n=8)
+    if not keywords:
+        keywords = _top_keywords_from_texts([probable_title, abstract, first_para], top_n=6)
+
+    semantic_query = _compress_query(" ".join(([probable_title] + keywords[:5])), max_chars=MAX_QUERY_LENGTH)
+    if len(semantic_query.split()) < 2:
+        semantic_query = _compress_query(" ".join(keywords[:5]), max_chars=MAX_QUERY_LENGTH)
+    if not semantic_query:
+        semantic_query = _compress_query(probable_title, max_chars=MAX_QUERY_LENGTH) or "artificial intelligence machine learning"
+
+    return {
+        "title": probable_title,
+        "keywords": keywords[:8],
+        "semantic_query": semantic_query,
+        "abstract_preview": (abstract or first_para or cleaned_text[:500]).strip()[:500],
+    }
 
 
-def clean_search_query(topic: str, max_chars: int = 80) -> str:
+def clean_search_query(topic: str, max_chars: int = MAX_QUERY_LENGTH) -> str:
     query = (topic or "").replace("\n", " ").strip()
     query = re.sub(r"[^\w\s\-]", " ", query)
     query = re.sub(r"\s+", " ", query).strip()
@@ -313,6 +419,66 @@ def _build_fallback_queries(topic: str) -> list[str]:
             seen.add(k)
             uniq.append(q[:80])
     return uniq[:4]
+
+
+def _build_multi_strategy_queries(topic_data: dict) -> list[str]:
+    title_q = _compress_query(topic_data.get("title", ""), MAX_QUERY_LENGTH)
+    semantic_q = _compress_query(topic_data.get("semantic_query", ""), MAX_QUERY_LENGTH)
+    keywords = topic_data.get("keywords") or []
+    keyword_q = _compress_query(" ".join(keywords[:5]), MAX_QUERY_LENGTH)
+    embedding_like_q = _compress_query(" ".join(_top_keywords_from_texts([topic_data.get("abstract_preview", ""), semantic_q], top_n=6)), MAX_QUERY_LENGTH)
+
+    queries = [title_q, semantic_q, keyword_q, embedding_like_q]
+    ordered = []
+    seen = set()
+    for q in queries:
+        if not q:
+            continue
+        key = q.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(q)
+    return ordered[:4]
+
+
+async def _multi_strategy_academic_search(topic_data: dict, per_source_limit: int = 8) -> tuple[list[dict], str, str]:
+    queries = _build_multi_strategy_queries(topic_data)
+    if not queries:
+        queries = _build_fallback_queries(topic_data.get("semantic_query", ""))
+
+    all_papers: list[dict] = []
+    used_ss_query = ""
+    used_oa_query = ""
+    query_labels = ["title", "semantic", "keywords", "embedding"]
+
+    for i, q in enumerate(queries):
+        label = query_labels[i] if i < len(query_labels) else f"fallback_{i+1}"
+        logger.info("[SEMANTIC QUERY] strategy=%s query=%s", label, q)
+
+        ss_batch = []
+        oa_batch = []
+        try:
+            logger.info("[SS SEARCH] strategy=%s query=%s", label, q)
+            ss_batch = await run_with_timeout(search_semantic_scholar(q, limit=per_source_limit), 12, fallback_value=[]) or []
+            if ss_batch and not used_ss_query:
+                used_ss_query = q
+        except Exception:
+            logger.exception("[SS SEARCH] failed strategy=%s query=%s", label, q)
+
+        try:
+            logger.info("[OA SEARCH] strategy=%s query=%s", label, q)
+            oa_batch = await run_with_timeout(search_openalex(q, limit=per_source_limit), 12, fallback_value=[]) or []
+            if oa_batch and not used_oa_query:
+                used_oa_query = q
+        except Exception:
+            logger.exception("[OA SEARCH] failed strategy=%s query=%s", label, q)
+
+        all_papers.extend(ss_batch)
+        all_papers.extend(oa_batch)
+        logger.info("[PAPERS FOUND] strategy=%s cumulative=%d", label, len(all_papers))
+
+    return all_papers, used_ss_query, used_oa_query
 
 
 def _tokenize_for_similarity(text: str) -> list[str]:
@@ -616,9 +782,11 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
 
     start_time = time.time()
     metadata = extract_paper_metadata(document_text)
-    topic = extract_research_topic(document_text)
-    logger.info("[TOPIC] Extracted topic: %s", topic)
-    fallback_queries = _build_fallback_queries(topic)
+    topic_data = extract_research_topic(document_text)
+    topic = topic_data.get("semantic_query") or "artificial intelligence machine learning"
+    logger.info("[TOPIC EXTRACTION] title=%s", topic_data.get("title", ""))
+    logger.info("[TOPIC EXTRACTION] keywords=%s", topic_data.get("keywords", []))
+    logger.info("[SEMANTIC QUERY] %s", topic)
 
     # Safe defaults to prevent researcher pipeline crashes on API/network issues.
     ss_similar = []
@@ -632,37 +800,9 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
     oa_concepts = []
     oa_works = []
 
-    used_ss_query = ""
-    for q in fallback_queries:
-        logger.info("[SEARCH] Semantic Scholar query: %s", q)
-        used_ss_query = q
-        try:
-            ss_similar = await run_with_timeout(
-                search_semantic_scholar(q, limit=5),
-                10,
-                fallback_value=[],
-            ) or []
-        except Exception:
-            logger.exception("[RESEARCH] Semantic Scholar search failed for query=%s", q)
-            ss_similar = []
-        if ss_similar:
-            break
-
-    used_oa_query = ""
-    for q in fallback_queries:
-        logger.info("[SEARCH] OpenAlex query: %s", q)
-        used_oa_query = q
-        try:
-            oa_similar = await run_with_timeout(
-                search_openalex(q, limit=5),
-                10,
-                fallback_value=[],
-            ) or []
-        except Exception:
-            logger.exception("[RESEARCH] OpenAlex search failed for query=%s", q)
-            oa_similar = []
-        if oa_similar:
-            break
+    all_raw_papers, used_ss_query, used_oa_query = await _multi_strategy_academic_search(topic_data, per_source_limit=8)
+    ss_similar = [p for p in all_raw_papers if (p.get("source_api") or p.get("source", "")).lower().startswith("semantic")]
+    oa_similar = [p for p in all_raw_papers if (p.get("source_api") or p.get("source", "")).lower().startswith("openalex")]
 
     try:
         ss_influential = await run_with_timeout(
@@ -685,7 +825,7 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
         oa_concepts = []
 
     # Merge -> dedupe -> schema guard -> empty filter
-    similar_papers = ss_similar + oa_similar
+    similar_papers = all_raw_papers
     normalized_papers = []
     seen_titles = set()
     for paper in similar_papers:
@@ -710,42 +850,66 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
             "relevance_score": paper.get("relevance_score", 0.0),
         })
 
-    merged_papers = sorted(
-        normalized_papers,
-        key=lambda p: (int(p.get("citation_count", 0) or 0), float(p.get("relevance_score", 0.0))),
-        reverse=True,
-    )[:8]
+    doc_semantic = topic_data.get("semantic_query", "")
+    doc_keywords = set(_tokenize_for_similarity(" ".join(topic_data.get("keywords") or [])))
+    doc_abstract = topic_data.get("abstract_preview", "")
+    ranked = []
+    for p in normalized_papers:
+        paper_text = f"{p.get('title', '')} {p.get('abstract', '')}"
+        semantic_sim = _tfidf_cosine_similarity(doc_semantic, paper_text)
+        paper_tokens = set(_tokenize_for_similarity(paper_text))
+        keyword_sim = (len(doc_keywords & paper_tokens) / max(1, len(doc_keywords | paper_tokens))) if doc_keywords else 0.0
+        abstract_sim = _tfidf_cosine_similarity(doc_abstract, p.get("abstract", ""))
+        score = (0.4 * semantic_sim) + (0.3 * keyword_sim) + (0.3 * abstract_sim)
+        p["similarity_percent"] = round(score * 100, 1)
+        p["abstract_snippet"] = (p.get("abstract") or "")[:240]
+        p["source"] = p.get("source_api") or p.get("source") or "Unknown"
+        logger.info(
+            "[SIMILARITY SCORE] title=%s semantic=%.3f keyword=%.3f abstract=%.3f final=%.3f",
+            p.get("title", "")[:80], semantic_sim, keyword_sim, abstract_sim, score
+        )
+        ranked.append((p, score))
+
+    ranked.sort(key=lambda x: (x[1], int(x[0].get("citation_count", 0) or 0), float(x[0].get("relevance_score", 0.0)), x[0].get("year") or 0), reverse=True)
+    merged_papers = [p for p, _ in ranked[:5]]
     oa_works = oa_similar
-    logger.info("[SEARCH] Papers found: %d", len(merged_papers))
+    logger.info("[PAPERS FOUND] final_unique=%d", len(merged_papers))
 
     if not merged_papers:
-        warnings.append("External academic APIs unavailable")
+        warnings.append("Limited academic comparison data available")
 
     quality_scores = compute_enhanced_quality(metadata, merged_papers, [])
     novelty_score = quality_scores["novelty_score"]
     missing_citations = find_missing_citations(metadata, merged_papers, ss_influential)
 
-    # Build simple trends from fetched papers only
-    year_counts = {}
-    for p in merged_papers:
-        y = p.get("year")
-        if not y:
-            continue
-        year_counts[y] = year_counts.get(y, 0) + 1
-    yearly_counts = [
-        {"year": y, "count": year_counts[y]} for y in sorted(year_counts.keys())
-    ]
-    total_pubs = sum(y["count"] for y in yearly_counts)
+    # Trend analysis must use semantic query only.
+    trend_from_api = await run_with_timeout(
+        get_topic_trends(topic_data.get("semantic_query", topic), years=10),
+        12,
+        fallback_value={"keyword": topic, "yearly_counts": [], "total": 0, "trend": "unknown"},
+    ) or {"keyword": topic, "yearly_counts": [], "total": 0, "trend": "unknown"}
+    yearly_counts = trend_from_api.get("yearly_counts") or []
+    total_pubs = int(trend_from_api.get("total", 0) or 0)
+    trend_raw = (trend_from_api.get("trend") or "unknown").lower()
+    if total_pubs >= 20000 or trend_raw == "growing":
+        trend_status = "HOT"
+    elif total_pubs >= 5000:
+        trend_status = "STABLE"
+    elif total_pubs > 0:
+        trend_status = "EMERGING"
+    else:
+        trend_status = "UNKNOWN"
 
     if not merged_papers:
-        fallback_msg = "No strong academic matches found."
+        fallback_msg = "Limited academic comparison data available"
         trend_data = {
-            "keyword": topic,
+            "keyword": topic_data.get("semantic_query", topic),
             "warning_message": fallback_msg,
-            "overall_trends": {"keyword": topic, "yearly_counts": [], "total": 0, "trend": "unknown"},
+            "overall_trends": {"keyword": topic_data.get("semantic_query", topic), "yearly_counts": yearly_counts, "total": total_pubs, "trend": trend_status.lower()},
             "main_trending_keywords": [],
             "publication_count": 0,
             "render": False,
+            "topic_status": trend_status,
         }
         suggestions = [{
             "category": "Academic Matching",
@@ -754,31 +918,19 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
             "details": "External scholarly APIs returned no strong matches for this topic."
         }]
     else:
-        trend_label = "unknown"
-        if len(yearly_counts) >= 2:
-            first = yearly_counts[0]["count"]
-            last = yearly_counts[-1]["count"]
-            if first > 0:
-                ratio = last / first
-                if ratio > 1.2:
-                    trend_label = "growing"
-                elif ratio < 0.8:
-                    trend_label = "declining"
-                else:
-                    trend_label = "stable"
-
         trend_data = {
-            "keyword": topic,
+            "keyword": topic_data.get("semantic_query", topic),
             "warning_message": "",
             "overall_trends": {
-                "keyword": topic,
+                "keyword": topic_data.get("semantic_query", topic),
                 "yearly_counts": yearly_counts,
                 "total": total_pubs,
-                "trend": trend_label,
+                "trend": trend_status.lower(),
             },
             "main_trending_keywords": [],
             "publication_count": total_pubs,
             "render": total_pubs > 0,
+            "topic_status": trend_status,
         }
         if total_pubs == 0:
             trend_data["warning_message"] = "Not enough academic data available for trend analysis."
@@ -796,7 +948,7 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
             suggestions = [{
                 "category": "Academic Matching",
                 "priority": "Medium",
-                "suggestion": "No strong academic matches found.",
+                "suggestion": "Limited academic comparison data available",
                 "details": "Try uploading a paper with a clearer abstract/title for better discovery."
             }]
     abstract_texts = [p.get("abstract", "") for p in merged_papers if (p.get("abstract") or "").strip()]
@@ -806,15 +958,16 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
         ranked_overlap.append((p, score))
     ranked_overlap.sort(key=lambda x: x[1], reverse=True)
     similarity_percent = round((sum(s for _, s in ranked_overlap) / len(ranked_overlap)) * 100, 1) if ranked_overlap else 0.0
-    logger.info("[SIMILARITY] Compared against %d abstracts", len(abstract_texts))
+    logger.info("[SIMILARITY SCORE] aggregate_overlap=%.1f compared=%d", similarity_percent, len(abstract_texts))
 
     overlap_analysis = {
         "enabled": bool(merged_papers),
         "status": "insufficient_reference_data" if not merged_papers else "available",
         "paper_count": len(merged_papers),
         "similarity_percent": similarity_percent,
-        "plagiarism_message": "Low confidence — insufficient comparison papers" if not merged_papers else f"Estimated overlap: {similarity_percent}%",
+        "plagiarism_message": "Limited academic comparison data available" if not merged_papers else f"Estimated overlap against scholarly abstracts: {similarity_percent}%",
         "compared_abstracts": len(abstract_texts),
+        "confidence": "low" if len(abstract_texts) < 2 else ("medium" if len(abstract_texts) < 5 else "high"),
     }
 
     elapsed = round(time.time() - start_time, 2)
@@ -831,7 +984,8 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
         "suggestions":        suggestions,
         "overlap_analysis":   overlap_analysis,
         "warnings":           warnings,
-        "extracted_topic":    topic,
+        "extracted_topic":    topic_data.get("semantic_query", topic),
+        "topic_extraction":   topic_data,
         "fallback_query_used": used_ss_query or used_oa_query or clean_search_query(topic),
         "papers_searched":    len(merged_papers),
         "success":            True,

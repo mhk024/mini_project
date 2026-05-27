@@ -665,7 +665,7 @@ async def analyze_plagiarism():
 
         novelty_value = analysis.get("novelty_score")
         novelty_text = f"{round(float(novelty_value) * 10, 1)}%" if novelty_value is not None else "0%"
-        overlap_text = overlap_info.get("plagiarism_message") or "Low confidence — insufficient comparison papers"
+        overlap_text = overlap_info.get("plagiarism_message") or "Limited academic comparison data available"
 
         return {
             "plagiarism": {
