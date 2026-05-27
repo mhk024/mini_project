@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 # 🌐 DOMAIN EXPANSION CONFIG
 # ─────────────────────────────────────────────
 GENERIC_TERMS = {"online", "system", "study", "analysis", "review", "approach", "method", "evaluation", "design", "model"}
+WEAK_TOPICS = {"online", "paper", "research", "document", "ai", "ml"}
 
 DOMAIN_SUBDOMAINS = {
     "artificial intelligence": ["Machine Learning", "Deep Learning", "Natural Language Processing", "Computer Vision", "Reinforcement Learning"],
@@ -128,6 +129,67 @@ def extract_paper_metadata(document_text: str) -> dict:
         "year":     year,
         "text_length": len(text),
     }
+
+
+def _extract_first_meaningful_paragraph(document_text: str) -> str:
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", document_text or "") if p.strip()]
+    for para in paragraphs:
+        words = re.findall(r"[A-Za-z][A-Za-z\-]{2,}", para)
+        if len(words) >= 20:
+            return para[:500]
+    return ""
+
+
+def _top_keywords_from_texts(texts: list[str], top_n: int = 4) -> list[str]:
+    blob = " ".join([t for t in texts if t]).lower()
+    tokens = re.findall(r"\b[a-z][a-z\-]{2,}\b", blob)
+    stop = {
+        "the", "and", "for", "with", "from", "that", "this", "these", "those", "using",
+        "into", "are", "was", "were", "have", "has", "had", "can", "could", "should",
+        "will", "would", "about", "paper", "research", "study", "document", "online",
+        "approach", "method", "analysis", "results", "based", "between", "within", "their",
+        "your", "our", "its", "also", "such", "more", "most", "than", "over"
+    }
+    freq = {}
+    for t in tokens:
+        if t in stop or len(t) < 4:
+            continue
+        freq[t] = freq.get(t, 0) + 1
+    ranked = sorted(freq.items(), key=lambda x: (-x[1], x[0]))
+    return [k for k, _ in ranked[:top_n]]
+
+
+def _is_weak_topic(topic: str) -> bool:
+    words = re.findall(r"[a-z]+", (topic or "").lower())
+    if not words:
+        return True
+    # Weak when topic collapses to generic terms only.
+    return all(w in WEAK_TOPICS for w in words)
+
+
+def extract_research_topic(document_text: str) -> str:
+    metadata = extract_paper_metadata(document_text)
+    title = (metadata.get("title") or "").strip()
+    abstract = (metadata.get("abstract") or "").strip()
+    first_para = _extract_first_meaningful_paragraph(document_text)
+
+    candidates = [title, abstract[:180], first_para[:180]]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        # Strip "Abstract:" prefix when present.
+        clean = re.sub(r"^\s*abstract\s*[:\-]?\s*", "", candidate, flags=re.IGNORECASE).strip()
+        words = re.findall(r"[A-Za-z][A-Za-z\-]{2,}", clean)
+        if not words:
+            continue
+        topic = " ".join(words[:8]).strip()
+        if topic and not _is_weak_topic(topic) and len(topic) >= 8:
+            return topic
+
+    fallback_keywords = _top_keywords_from_texts([title, abstract], top_n=4)
+    if fallback_keywords:
+        return " ".join(fallback_keywords)
+    return title or "No strong academic matches found."
 
 
 # ─────────────────────────────────────────────
@@ -403,17 +465,16 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
 
     start_time = time.time()
     metadata = extract_paper_metadata(document_text)
-    title = metadata["title"]
-    keywords = metadata["keywords"]
-    search_query = f"{title} {' '.join(keywords[:2])}"[:200]
+    topic = extract_research_topic(document_text)
+    logger.info(f"RESEARCH_TOPIC={topic}")
 
     # Parallel tasks
     tasks = {
-        "ss_similar":   get_similar_papers(title, metadata["abstract"], limit=10),
-        "ss_influential": get_influential_papers(search_query, limit=5),
-        "oa_works":     search_works(search_query, limit=10),
-        "trends":       get_domain_aware_trends_async(keywords[0] if keywords else title[:50]),
-        "concepts":     get_related_concepts(keywords[0] if keywords else title[:50], limit=8)
+        "ss_similar":   search_papers(topic, limit=10),
+        "ss_influential": get_influential_papers(topic, limit=5),
+        "oa_works":     search_works(topic, limit=10),
+        "trends":       get_domain_aware_trends_async(topic),
+        "concepts":     get_related_concepts(topic, limit=8)
     }
 
     results = {}
@@ -429,7 +490,49 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
     quality_scores = compute_enhanced_quality(metadata, ss_similar, oa_works)
     novelty_score = quality_scores["novelty_score"]
     missing_citations = find_missing_citations(metadata, ss_similar, ss_influential)
-    suggestions = generate_research_suggestions(metadata, ss_similar, oa_works, domain_trends.get("overall_trends", {}), missing_citations, novelty_score, quality_scores)
+
+    if not ss_similar and not oa_works:
+        fallback_msg = "No strong academic matches found."
+        domain_trends = {
+            "keyword": topic,
+            "is_generic": False,
+            "warning_message": fallback_msg,
+            "overall_trends": {"keyword": topic, "yearly_counts": [], "total": 0, "trend": "unknown"},
+            "main_trending_keywords": [],
+            "subdomains": [],
+            "publication_count": 0,
+            "render": False,
+        }
+        suggestions = [{
+            "category": "Academic Matching",
+            "priority": "Medium",
+            "suggestion": fallback_msg,
+            "details": "External scholarly APIs returned no strong matches for this topic."
+        }]
+    else:
+        total_publications = int((domain_trends.get("overall_trends") or {}).get("total", 0) or 0)
+        domain_trends["publication_count"] = total_publications
+        domain_trends["render"] = total_publications > 0
+        if total_publications <= 0:
+            domain_trends["warning_message"] = "No strong academic matches found."
+
+        suggestions = generate_research_suggestions(
+            metadata,
+            ss_similar,
+            oa_works,
+            domain_trends.get("overall_trends", {}),
+            missing_citations,
+            novelty_score,
+            quality_scores,
+        )
+        if not suggestions:
+            suggestions = [{
+                "category": "Academic Matching",
+                "priority": "Medium",
+                "suggestion": "No strong academic matches found.",
+                "details": "Try uploading a paper with a clearer abstract/title for better discovery."
+            }]
+
 
     elapsed = round(time.time() - start_time, 2)
     final = {

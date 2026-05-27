@@ -645,20 +645,38 @@ async def analyze_quality():
 async def analyze_plagiarism():
     try:
         text = await _get_active_document_text()
-        from research_analyzer import analyze_paper_async
-        result = await analyze_paper_async(get_llm(), text)
-        if "error" in result:
-            raise HTTPException(status_code=500, detail=result["error"])
-            
-        novelty = result.get("scores", {}).get("novelty", 7.0)
+        if not text or not text.strip():
+            raise HTTPException(status_code=400, detail="No active document text found.")
+
+        bracket_citations = len(re.findall(r"\[\s*\d{1,3}(?:\s*,\s*\d{1,3})*\s*\]", text))
+        author_year_citations = len(re.findall(r"\(([A-Z][A-Za-z\-]+(?:\s+et al\.)?,\s*(?:19|20)\d{2})\)", text))
+        doi_mentions = len(re.findall(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", text, flags=re.IGNORECASE))
+        has_references_section = bool(re.search(r"\b(references|bibliography|works cited)\b", text, flags=re.IGNORECASE))
+
+        total_citation_markers = bracket_citations + author_year_citations + doi_mentions + (1 if has_references_section else 0)
+        if bracket_citations >= author_year_citations and bracket_citations > 0:
+            style_guess = "Numeric ([1], [2])"
+        elif author_year_citations > 0:
+            style_guess = "Author-Year ((Author, 2023))"
+        elif doi_mentions > 0:
+            style_guess = "DOI-driven references"
+        else:
+            style_guess = "Unknown"
+
+        if total_citation_markers == 0:
+            return {
+                "academic_reference_analysis": {
+                    "references_detected_count": 0,
+                    "citation_style_guess": "Unknown",
+                    "missing_references_warning": "No citation metadata detected in uploaded paper."
+                }
+            }
+
         return {
-            "plagiarism": {
-                "plagiarism_risk": "Low" if novelty >= 7.0 else "Medium" if novelty >= 4.0 else "High",
-                "novelty_score": f"{novelty * 10:.0f}%",
-                "overlap_analysis": result.get("plagiarism", ""),
-                "similar_papers_summary": result.get("similar_papers", []),
-                "missing_references": result.get("weaknesses", []),
-                "improvements": result.get("suggestions", [])
+            "academic_reference_analysis": {
+                "references_detected_count": int(total_citation_markers),
+                "citation_style_guess": style_guess,
+                "missing_references_warning": "" if has_references_section else "References section not clearly detected."
             }
         }
     except HTTPException:
