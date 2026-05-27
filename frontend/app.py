@@ -181,6 +181,111 @@ h1 {
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+[data-testid="stAppViewContainer"] {
+    background: radial-gradient(circle at 20% 0%, #1e293b 0%, #0b1020 38%, #05070f 100%);
+}
+[data-testid="stHeader"], [data-testid="stToolbar"] { background: transparent; }
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, rgba(8, 13, 28, 0.98), rgba(10, 16, 34, 0.92));
+    border-right: 1px solid rgba(148, 163, 184, 0.16);
+}
+.dashboard-hero {
+    padding: 16px 4px 18px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    margin-bottom: 14px;
+}
+.dashboard-title {
+    margin: 0;
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #f8fafc;
+}
+.dashboard-subtitle { margin: 6px 0 0; color: #94a3b8; font-size: 14px; }
+.stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 12px 0 18px; }
+.stat-card {
+    background: linear-gradient(145deg, rgba(30,41,59,0.65), rgba(15,23,42,0.45));
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 18px;
+    padding: 14px 16px;
+    min-height: 92px;
+    box-shadow: 0 10px 28px rgba(2, 6, 23, 0.4);
+    transition: all 0.3s ease;
+}
+.stat-card:hover { transform: translateY(-2px) scale(1.01); border-color: rgba(99,102,241,0.45); }
+.stat-k { color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+.stat-v { color: #f8fafc; font-size: 24px; font-weight: 700; margin-top: 6px; }
+.stat-h { color: #60a5fa; font-size: 12px; margin-top: 4px; }
+.card-shell {
+    background: rgba(15, 23, 42, 0.55);
+    border: 1px solid rgba(148,163,184,0.2);
+    border-radius: 20px;
+    padding: 18px;
+    min-height: 320px;
+    box-shadow: 0 12px 34px rgba(2, 6, 23, 0.36);
+}
+.card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.card-title { color: #e2e8f0; font-weight: 700; font-size: 16px; letter-spacing: 0.02em; }
+.status-row { display:flex; gap:8px; flex-wrap: wrap; margin: 8px 0 12px; }
+.status-pill { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid transparent; }
+.status-success { color:#22c55e; background:rgba(34,197,94,.14); border-color:rgba(34,197,94,.34); }
+.status-warning { color:#f59e0b; background:rgba(245,158,11,.14); border-color:rgba(245,158,11,.34); }
+.status-analyzing { color:#60a5fa; background:rgba(96,165,250,.14); border-color:rgba(96,165,250,.34); }
+.status-cached { color:#a78bfa; background:rgba(167,139,250,.14); border-color:rgba(167,139,250,.34); }
+.status-live { color:#22d3ee; background:rgba(34,211,238,.14); border-color:rgba(34,211,238,.34); }
+.empty-state { min-height: 196px; border:1px dashed rgba(148,163,184,0.3); border-radius:16px; padding:20px; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; background:rgba(15,23,42,0.35);}
+.empty-icon {font-size:22px; margin-bottom:8px;}
+.empty-title {color:#cbd5e1; font-weight:600;}
+.empty-subtitle {color:#64748b; font-size:13px; margin-top:4px;}
+.skeleton-wrap { margin-top: 8px; }
+.skeleton-line, .skeleton-chart { position:relative; overflow:hidden; background:rgba(148,163,184,0.12); border-radius:12px; margin-bottom:10px; }
+.skeleton-line { height:14px; }
+.skeleton-chart { height:180px; border-radius:16px; }
+.skeleton-line::after, .skeleton-chart::after {
+    content:""; position:absolute; inset:0; transform:translateX(-100%);
+    background:linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+    animation: shimmer 1.4s infinite;
+}
+@keyframes shimmer { 100% { transform:translateX(100%); } }
+.api-alert {
+    display:flex; gap:8px; align-items:flex-start;
+    border:1px solid rgba(248,113,113,0.32); background:rgba(127,29,29,0.23);
+    color:#fecaca; padding:10px 12px; border-radius:12px; margin-bottom:10px; font-size:13px;
+}
+.chat-shell {
+    border: 1px solid rgba(148,163,184,0.18);
+    border-radius: 18px;
+    padding: 10px 12px;
+    background: rgba(15,23,42,0.35);
+    margin: 8px 0 12px;
+}
+.eval-header { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:6px 0 14px; }
+.eval-title { color:#e2e8f0; font-weight:700; font-size:18px; }
+.eval-sub { color:#94a3b8; font-size:13px; }
+.perf-metric { color:#94a3b8; font-size:11px; line-height:1.45; margin:2px 0; }
+[data-testid="stSidebar"] details {
+    transition: all 200ms ease;
+}
+[data-testid="stSidebar"] details summary {
+    color:#cbd5e1;
+    font-size:12px;
+    font-weight:600;
+}
+[data-testid="stButton"] button {
+    border-radius: 14px !important;
+    border: 1px solid rgba(99, 102, 241, 0.42) !important;
+    background: linear-gradient(135deg, rgba(99,102,241,0.95), rgba(139,92,246,0.95)) !important;
+    color: #f8fafc !important;
+    box-shadow: 0 8px 24px rgba(99,102,241,.26);
+    transition: transform .2s ease, box-shadow .2s ease, opacity .2s ease !important;
+}
+[data-testid="stButton"] button:hover { transform: translateY(-1px) scale(1.01); box-shadow: 0 12px 28px rgba(99,102,241,.36); }
+[data-testid="stButton"] button:disabled { opacity: .6; cursor: not-allowed; }
+</style>
+""", unsafe_allow_html=True)
+
 
 # ─────────────────────────────────────────────────────────────
 # 🧠  SESSION STATE
@@ -210,6 +315,13 @@ DEFAULTS = {
     "eval_result":    None,
     "eval_job_id":    None,
     "dashboard_data": None,
+    "research_loading": {},
+    "research_errors": {},
+    "eval_loading": {},
+    "eval_errors": {},
+    "show_perf_metrics": False,
+    "perf_debug_mode": False,
+    "sidebar_compact": False,
     "confirm_delete_sid": None,
     "confirm_delete_title": None,
     "mode_store": {
@@ -218,13 +330,29 @@ DEFAULTS = {
             "messages": [], "pipeline_data": {}, "last_input": "",
             "res_quality": None, "res_plagiarism": None, "res_trends": None, "res_suggestions": None,
         },
-        "eval": {"eval_result": None, "eval_job_id": None, "last_input": "", "runs": []},
-        "eval_engine": {"eval_result": None, "questions": ["What is the primary objective of this research?", "What is the core methodology used?", "What are the key findings?", "What are the main limitations identified?", "How does this work contribute to the field?"], "last_input": ""},
+        "eval": {
+            "eval_result": None,
+            "eval_job_id": None,
+            "engine_result": None,
+            "questions": [
+                "What is the primary objective of this research?",
+                "What is the core methodology used?",
+                "What are the key findings?",
+                "What are the main limitations identified?",
+                "How does this work contribute to the field?",
+            ],
+            "last_input": "",
+            "runs": [],
+        },
     },
 }
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+# Backward compatibility for old persisted mode name.
+if st.session_state.mode == "eval_engine":
+    st.session_state.mode = "eval"
 
 # URL-based login persistence
 qp = st.query_params
@@ -280,6 +408,92 @@ def score_bar(label: str, value: float, color: str):
             <div class="score-bar-fill" style="width:{pct}%;background:{color}"></div>
         </div>
     </div>"""
+
+
+def render_empty_state(message: str, icon: str = "🗂"):
+    st.markdown(
+        f"""
+        <div class="empty-state">
+            <div class="empty-icon">{icon}</div>
+            <div class="empty-title">{message}</div>
+            <div class="empty-subtitle">Run analysis to populate this section.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_skeleton_state(lines: int = 4, chart: bool = False):
+    line_blocks = "".join('<div class="skeleton-line"></div>' for _ in range(max(1, lines)))
+    chart_block = '<div class="skeleton-chart"></div>' if chart else ""
+    st.markdown(
+        f"""
+        <div class="skeleton-wrap">
+            {chart_block}
+            {line_blocks}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_api_alert(card_key: str):
+    msg = st.session_state.get("research_errors", {}).get(card_key)
+    if msg:
+        st.markdown(
+            f"""
+            <div class="api-alert">
+                <span>⚠️</span>
+                <span>{strip_html(msg)}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_status_badges(statuses: list[str]):
+    color_map = {
+        "success": "status-success",
+        "warning": "status-warning",
+        "analyzing": "status-analyzing",
+        "cached": "status-cached",
+        "live": "status-live",
+    }
+    pills = "".join(
+        f'<span class="status-pill {color_map.get(s, "status-live")}">{s.title()}</span>'
+        for s in statuses
+    )
+    st.markdown(f'<div class="status-row">{pills}</div>', unsafe_allow_html=True)
+
+
+def run_research_call(state_key: str, url: str, button_label: str, timeout: int, status_text: str):
+    btn_key = f"btn_{state_key}"
+    if st.button(button_label, key=btn_key, use_container_width=True, type="primary"):
+        st.session_state.setdefault("research_loading", {})[state_key] = True
+        st.session_state.setdefault("research_errors", {})[state_key] = None
+        with st.status(status_text, expanded=True) as status:
+            st.write("🔎 Collecting context...")
+            st.write("🤖 Running AI analysis...")
+            try:
+                r = requests.post(url, timeout=timeout)
+                if r.status_code == 200:
+                    st.session_state[state_key] = r.json()
+                    status.update(label="✅ Analysis completed", state="complete", expanded=False)
+                    _snapshot_mode_local("researcher")
+                    st.session_state.setdefault("research_loading", {})[state_key] = False
+                    st.rerun()
+                else:
+                    detail = r.text[:240]
+                    try:
+                        detail = r.json().get("detail", detail)
+                    except Exception:
+                        pass
+                    st.session_state.setdefault("research_errors", {})[state_key] = f"API error {r.status_code}: {detail}"
+                    status.update(label="❌ Analysis failed", state="error", expanded=False)
+            except Exception as exc:
+                st.session_state.setdefault("research_errors", {})[state_key] = f"Network error: {exc}"
+                status.update(label="❌ Request failed", state="error", expanded=False)
+            st.session_state.setdefault("research_loading", {})[state_key] = False
 
 
 def render_doc_card(doc: dict, idx: int):
@@ -392,14 +606,10 @@ def _snapshot_mode_local(mode: str):
         st.session_state.mode_store["eval"] = {
             "eval_result": st.session_state.eval_result,
             "eval_job_id": st.session_state.eval_job_id,
+            "engine_result": st.session_state.mode_store["eval"].get("engine_result"),
+            "questions": st.session_state.mode_store["eval"].get("questions", DEFAULTS["mode_store"]["eval"]["questions"]),
             "last_input": st.session_state.mode_store["eval"].get("last_input", ""),
             "runs": st.session_state.mode_store["eval"].get("runs", []),
-        }
-    else:
-        st.session_state.mode_store["eval_engine"] = {
-            "eval_result": st.session_state.mode_store["eval_engine"].get("eval_result"),
-            "questions": st.session_state.mode_store["eval_engine"].get("questions"),
-            "last_input": st.session_state.mode_store["eval_engine"].get("last_input", ""),
         }
 
 def _restore_mode_local(mode: str):
@@ -422,9 +632,6 @@ def _restore_mode_local(mode: str):
     elif mode == "eval":
         st.session_state.eval_result = data.get("eval_result")
         st.session_state.eval_job_id = data.get("eval_job_id")
-    else:
-        # eval_engine uses its own internal state in mode_store mostly
-        pass
 
 def _sync_mode_to_backend(mode: str):
     if not st.session_state.username:
@@ -478,6 +685,8 @@ def _load_full_state_from_backend():
         st.session_state.mode_store["eval"] = {
             "eval_result": payload.get("Evaluate", {}).get("last_results"),
             "eval_job_id": None,
+            "engine_result": None,
+            "questions": DEFAULTS["mode_store"]["eval"]["questions"],
             "last_input": payload.get("Evaluate", {}).get("last_input", ""),
             "runs": payload.get("Evaluate", {}).get("runs", []),
         }
@@ -589,10 +798,11 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     st.markdown(f"### 👤 **{st.session_state.username}**")
+    st.session_state.sidebar_compact = st.toggle("Compact sidebar", value=st.session_state.sidebar_compact)
 
     # ── Mode selector ──
     st.markdown("#### 🎛 Mode")
-    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1, mc2, mc3 = st.columns(3)
     with mc1:
         if st.button("🎓 Student", use_container_width=True,
                      type="primary" if st.session_state.mode == "student" else "secondary"):
@@ -629,22 +839,16 @@ with st.sidebar:
             except Exception:
                 pass
             st.rerun()
-    with mc4:
-        if st.button("🎓 Engine", use_container_width=True,
-                     type="primary" if st.session_state.mode == "eval_engine" else "secondary",
-                     help="Academic Evaluation Engine"):
-            _snapshot_mode_local(st.session_state.mode)
-            _sync_mode_to_backend(st.session_state.mode)
-            st.session_state.mode = "eval_engine"
-            _restore_mode_local("eval_engine")
-            try:
-                requests.post(f"{STATE_URL}/{st.session_state.username}/switch", json={"mode": "eval_engine"}, timeout=120)
-            except Exception:
-                pass
-            st.rerun()
-
-    _lbl = {"student": "🎓 Student / Faculty", "researcher": "🔬 Author / Researcher", "eval": "📊 ML Evaluation", "eval_engine": "🎓 Academic Eval Engine"}
-    st.caption(f"Active: **{_lbl.get(st.session_state.mode, '')}**")
+    _lbl = {"student": "🎓 Student / Faculty", "researcher": "🔬 Author / Researcher", "eval": "📊 Evaluation Workspace"}
+    st.markdown(
+        f"""
+        <div style="margin-top:8px;padding:8px 10px;border-radius:12px;border:1px solid rgba(96,165,250,0.4);
+                    background:rgba(30,58,138,0.2);color:#bfdbfe;font-size:12px;font-weight:600;">
+            Active workspace: {_lbl.get(st.session_state.mode, '')}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     try:
         d = requests.get(f"{DASH_URL}/{st.session_state.username}", timeout=120)
         if d.status_code == 200:
@@ -653,14 +857,23 @@ with st.sidebar:
         pass
 
     dash = st.session_state.dashboard_data or {}
-    if dash:
-        st.markdown("#### 📈 Performance")
-        for mk, label in [("Student", "Student"), ("Research", "Research"), ("Evaluate", "Evaluate"), ("EvalEngine", "Engine")]:
-            m = dash.get(mk, {})
-            st.caption(
-                f"{label}: q={m.get('total_queries',0)} | avg={m.get('avg_response_time_ms',0):.1f}ms | "
-                f"cache={m.get('cache_hit_rate',0)*100:.1f}%"
+    if dash and not st.session_state.sidebar_compact:
+        perf_label = "▼ Performance Metrics" if st.session_state.show_perf_metrics else "▶ Performance Metrics"
+        if st.button(perf_label, key="perf_toggle_btn", use_container_width=True, type="secondary"):
+            st.session_state.show_perf_metrics = not st.session_state.show_perf_metrics
+
+        if st.session_state.show_perf_metrics:
+            st.session_state.perf_debug_mode = st.toggle(
+                "Debug mode (show cache stats)",
+                value=st.session_state.perf_debug_mode,
+                key="perf_debug_toggle",
             )
+            for mk, label in [("Student", "Student"), ("Research", "Research"), ("Evaluate", "Evaluate"), ("EvalEngine", "Engine")]:
+                m = dash.get(mk, {})
+                line = f"{label}: q={m.get('total_queries',0)} | avg={m.get('avg_response_time_ms',0):.1f}ms"
+                if st.session_state.perf_debug_mode:
+                    line += f" | cache={m.get('cache_hit_rate',0)*100:.1f}%"
+                st.markdown(f"<div class='perf-metric'>{line}</div>", unsafe_allow_html=True)
 
     st.divider()
 
@@ -670,7 +883,8 @@ with st.sidebar:
         value=st.session_state.show_ml,
         help="Show full RAG pipeline: query enhancement → retrieval → re-ranking → generation"
     )
-    st.caption("📊 Pipeline ON" if st.session_state.show_ml else "💬 Pipeline OFF")
+    if not st.session_state.sidebar_compact:
+        st.caption("📊 Pipeline ON" if st.session_state.show_ml else "💬 Pipeline OFF")
 
     st.divider()
 
@@ -910,12 +1124,23 @@ with st.sidebar:
 # ─────────────────────────────────────────────────────────────
 _TITLES = {
     "student":    ("🎓 Student / Faculty Mode",   "Ask questions about your research paper and get simplified, structured answers."),
-    "researcher": ("🔬 Author / Researcher Mode",   "Analyze your research paper for quality, originality, trends, and improvements."),
-    "eval":       ("📊 ML Evaluation Mode",          "Benchmark the RAG pipeline across standard research questions with full ML metrics."),
+    "researcher": ("Research Intelligence Dashboard",   "AI-powered academic analysis and semantic research insights"),
+    "eval":       ("Evaluation Workspace",          "Unified benchmarking + per-question academic evaluation."),
 }
 _t, _c = _TITLES.get(st.session_state.mode, _TITLES["student"])
-st.title(_t)
-st.caption(_c)
+if st.session_state.mode == "researcher":
+    st.markdown(
+        f"""
+        <div class="dashboard-hero">
+            <h1 class="dashboard-title">{_t}</h1>
+            <p class="dashboard-subtitle">{_c}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+else:
+    st.title(_t)
+    st.caption(_c)
 
 if st.session_state.loaded_file:
     st.markdown(
@@ -943,20 +1168,41 @@ if st.session_state.show_ml:
 # 🎓  STUDENT MODE
 # ─────────────────────────────────────────────────────────────
 if st.session_state.mode == "student":
+    st.markdown(
+        """
+        <div class="dashboard-hero" style="margin-top:-8px;">
+            <h2 class="dashboard-title" style="font-size:28px;">Student Research Workspace</h2>
+            <p class="dashboard-subtitle">Ask, simplify, summarize, and inspect RAG pipeline outputs in one place.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if not st.session_state.messages:
-        st.markdown("""
-        <div style="text-align:center;padding:50px 20px;color:#64748b">
-            <div style="font-size:44px;margin-bottom:14px">🎓</div>
-            <h3 style="color:#94a3b8;-webkit-text-fill-color:#94a3b8;font-weight:500">Ready to help you understand</h3>
-            <p style="font-size:15px">Upload a research paper and ask any question — you'll get a clear answer, simplified explanation, key points, and a summary.</p>
-        </div>""", unsafe_allow_html=True)
+        render_empty_state("Ready to help you understand your paper.", "🎓")
+    else:
+        st.markdown(
+            """
+            <div class="stats-grid" style="grid-template-columns: repeat(3, minmax(0,1fr));">
+                <div class="stat-card"><div class="stat-k">Conversation Turns</div><div class="stat-v">"""
+            + str(len(st.session_state.messages))
+            + """</div><div class="stat-h">Session context retained</div></div>
+                <div class="stat-card"><div class="stat-k">Pipeline Traces</div><div class="stat-v">"""
+            + str(len(st.session_state.pipeline_data))
+            + """</div><div class="stat-h">Explainability enabled</div></div>
+                <div class="stat-card"><div class="stat-k">ML Mode</div><div class="stat-v">"""
+            + ("ON" if st.session_state.show_ml else "OFF")
+            + """</div><div class="stat-h">Toggle in sidebar</div></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     # Display history
     for idx, msg in enumerate(st.session_state.messages):
         role = msg.get("role", "assistant")
         with st.chat_message(role):
-            st.markdown(msg.get("content", ""))
+            st.markdown(f"<div class='chat-shell'>{msg.get('content', '')}</div>", unsafe_allow_html=True)
 
         if msg.get("role", "assistant") == "assistant":
             pid = str(idx)
@@ -1080,26 +1326,61 @@ if st.session_state.mode == "student":
 # 🔬  RESEARCHER MODE
 # ─────────────────────────────────────────────────────────────
 elif st.session_state.mode == "researcher":
-    st.markdown("### 📊 Research Analysis Dashboard")
-    st.markdown("Run each analysis independently. Results are cached until you load a different document.")
+    st.markdown("Run each analysis independently. Results stay cached until a new document is loaded.")
 
     if not st.session_state.loaded_file:
         st.info("👆 Load a document from the sidebar to start analysis.")
         st.stop()
 
-    # ── 4 analysis cards in 2×2 grid ──
+    q_data = st.session_state.res_quality
+    p_data = st.session_state.res_plagiarism
+    t_data = st.session_state.res_trends
+    s_data = st.session_state.res_suggestions
+
+    quality_scores = (q_data or {}).get("scores") or (q_data or {}).get("quality", {})
+    novelty_value = quality_scores.get("novelty")
+    if novelty_value is None and p_data:
+        novelty_value = p_data.get("plagiarism", {}).get("novelty_score", "0%")
+
+    similar_papers_count = 0
+    if p_data:
+        similar_papers_count = len(p_data.get("plagiarism", {}).get("similar_papers_summary", []))
+
+    confidence = "72%"
+    if quality_scores:
+        vals = [v for v in quality_scores.values() if isinstance(v, (int, float))]
+        if vals:
+            confidence = f"{(sum(vals) / max(len(vals), 1)) * 10:.0f}%"
+
+    research_score = "N/A"
+    if quality_scores:
+        vals = [v for v in quality_scores.values() if isinstance(v, (int, float))]
+        if vals:
+            research_score = f"{sum(vals) / len(vals):.1f}/10"
+
+    stats = [
+        ("Research Score", research_score, "Quality confidence"),
+        ("Similar Papers", str(similar_papers_count), "Semantic overlap"),
+        ("Novelty %", str(novelty_value or "N/A"), "Originality metric"),
+        ("AI Confidence", confidence, "Model confidence"),
+    ]
+    stat_html = "".join(
+        f'<div class="stat-card"><div class="stat-k">{k}</div><div class="stat-v">{v}</div><div class="stat-h">{h}</div></div>'
+        for k, v, h in stats
+    )
+    st.markdown(f'<div class="stats-grid">{stat_html}</div>', unsafe_allow_html=True)
+
     row1_c1, row1_c2 = st.columns(2)
     row2_c1, row2_c2 = st.columns(2)
 
     # ── 1. Quality Index ─────────────────────────────────────
     with row1_c1:
-        st.markdown("""
-        <div class="ai-card" style="opacity:1;animation:none;min-height:200px">
-            <div class="card-header">📊 Quality Index</div>
-        </div>""", unsafe_allow_html=True)
-
-        q_data = st.session_state.res_quality
-        if q_data:
+        st.markdown('<div class="card-shell"><div class="card-head"><span class="card-title">📊 Quality Index</span></div>', unsafe_allow_html=True)
+        render_status_badges(["cached" if q_data else "live", "success" if q_data else "analyzing"])
+        render_api_alert("res_quality")
+        if st.session_state.get("research_loading", {}).get("res_quality"):
+            render_skeleton_state(lines=5, chart=True)
+        elif q_data:
             # Support both old (quality{}) and new (scores{}) schema shapes
             q = q_data.get("scores") or q_data.get("quality", {})
             bar_colors = {
@@ -1109,44 +1390,51 @@ elif st.session_state.mode == "researcher":
                 "Tech Depth":    ("technical_depth","#38bdf8"),
                 "Methodology":   ("methodology",    "#fbbf24"),
             }
-            bars_html = "".join(
-                score_bar(lbl, q.get(key, 0), color)
-                for lbl, (key, color) in bar_colors.items()
-                if q.get(key) is not None
-            )
-            st.markdown(bars_html, unsafe_allow_html=True)
+            available = [(lbl, key, color) for lbl, (key, color) in bar_colors.items() if q.get(key) is not None]
+            if available:
+                bars_html = "".join(score_bar(lbl, q.get(key, 0), color) for lbl, key, color in available)
+                st.markdown(bars_html, unsafe_allow_html=True)
+                fig = go.Figure()
+                fig.add_trace(go.Scatterpolar(
+                    r=[q.get(key, 0) for _, key, _ in available],
+                    theta=[lbl for lbl, _, _ in available],
+                    fill="toself",
+                    line=dict(color="#60a5fa", width=2),
+                    fillcolor="rgba(96,165,250,0.18)",
+                    hovertemplate="%{theta}: %{r:.1f}/10<extra></extra>",
+                    name="Quality",
+                ))
+                fig.update_layout(
+                    margin=dict(l=20, r=20, t=10, b=10),
+                    height=260,
+                    showlegend=False,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    polar=dict(bgcolor="rgba(0,0,0,0)", radialaxis=dict(range=[0, 10], gridcolor="rgba(148,163,184,0.2)")),
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
             # Metric row — show up to 4
             shown_keys = [(lbl, k) for lbl, (k, _) in bar_colors.items() if q.get(k) is not None][:4]
-            cols = st.columns(len(shown_keys))
-            for col, (lbl, key) in zip(cols, shown_keys):
-                with col:
-                    st.metric(lbl, f"{q.get(key, 0):.1f}")
+            if shown_keys:
+                cols = st.columns(len(shown_keys))
+                for col, (lbl, key) in zip(cols, shown_keys):
+                    with col:
+                        st.metric(lbl, f"{q.get(key, 0):.1f}")
+            else:
+                render_empty_state("No quality analysis generated yet.", "📊")
         else:
-            st.markdown("<p style='color:#64748b;font-size:14px'>Scores clarity, novelty, and readability of your paper using AI.</p>", unsafe_allow_html=True)
-
-        if st.button("▶ Run Quality Analysis", key="btn_quality", use_container_width=True, type="primary"):
-            with st.status("📊 Analyzing Quality...", expanded=True) as status:
-                st.write("🧠 Scoring paper structure...")
-                r = requests.post(ANA_QUALITY, timeout=120)
-                if r.status_code == 200:
-                    st.session_state.res_quality = r.json()
-                    status.update(label="✅ Quality Analysis Done", state="complete", expanded=False)
-                    _snapshot_mode_local("researcher")
-                    st.rerun()
-                else:
-                    status.update(label="❌ Analysis Failed", state="error")
-                    st.error(f"Error: {r.text[:200]}")
+            render_empty_state("No quality analysis generated yet.", "📊")
+        run_research_call("res_quality", ANA_QUALITY, "▶ Run Quality Analysis", 120, "📊 Analyzing quality...")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # ── 2. Plagiarism & Overlap Detection ──────────────────────────────
     with row1_c2:
-        st.markdown("""
-        <div class="ai-card" style="opacity:1;animation:none;min-height:200px">
-            <div class="card-header">🔍 Plagiarism & Overlap Check</div>
-        </div>""", unsafe_allow_html=True)
-
-        p_data = st.session_state.res_plagiarism
-        if p_data:
+        st.markdown('<div class="card-shell"><div class="card-head"><span class="card-title">🔍 Plagiarism & Overlap Check</span></div>', unsafe_allow_html=True)
+        render_status_badges(["cached" if p_data else "live", "warning" if p_data else "analyzing"])
+        render_api_alert("res_plagiarism")
+        if st.session_state.get("research_loading", {}).get("res_plagiarism"):
+            render_skeleton_state(lines=5, chart=True)
+        elif p_data:
             plag = p_data.get("plagiarism", {})
             risk = plag.get("plagiarism_risk", "Unknown")
             novelty = plag.get("novelty_score", "0%")
@@ -1181,63 +1469,63 @@ elif st.session_state.mode == "researcher":
                 with st.expander("💡 Improvements", expanded=False):
                     for idx, imp in enumerate(improvements):
                         st.markdown(f"<div style='color:#fbbf24;font-size:13px'>- {imp}</div>", unsafe_allow_html=True)
-                        
+            if not any([overlap, similar_summaries, missing_refs, improvements]):
+                render_empty_state("No plagiarism data available.", "🔍")
         else:
-            st.markdown("<p style='color:#64748b;font-size:14px'>Checks overlap, novelty, and missing citations against real-world similar published papers.</p>", unsafe_allow_html=True)
-
-        if st.button("▶ Run Plagiarism Check", key="btn_plag", use_container_width=True, type="primary"):
-            with st.status("🔍 Checking Plagiarism...", expanded=True) as status:
-                st.write("🌐 Searching external databases...")
-                r = requests.post(ANA_PLAGIARISM, timeout=180)
-                if r.status_code == 200:
-                    st.session_state.res_plagiarism = r.json()
-                    status.update(label="✅ Plagiarism Check Done", state="complete", expanded=False)
-                    _snapshot_mode_local("researcher")
-                    st.rerun()
-                else:
-                    status.update(label="❌ Check Failed", state="error")
-                    st.error(f"Error: {r.text[:200]}")
+            render_empty_state("No plagiarism data available.", "🔍")
+        run_research_call("res_plagiarism", ANA_PLAGIARISM, "▶ Run Plagiarism Check", 180, "🔍 Checking plagiarism...")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # ── 3. Trend Analysis ────────────────────────────────────
     with row2_c1:
-        st.markdown("""
-        <div class="ai-card" style="opacity:1;animation:none;min-height:200px">
-            <div class="card-header">📈 Trend Analysis</div>
-        </div>""", unsafe_allow_html=True)
-
-        t_data = st.session_state.res_trends
-        if t_data:
+        st.markdown('<div class="card-shell"><div class="card-head"><span class="card-title">📈 Trend Analysis</span></div>', unsafe_allow_html=True)
+        render_status_badges(["cached" if t_data else "live", "success" if t_data else "analyzing"])
+        render_api_alert("res_trends")
+        if st.session_state.get("research_loading", {}).get("res_trends"):
+            render_skeleton_state(lines=4, chart=True)
+        elif t_data:
             trend_text = t_data.get("trend_analysis", "No analysis available.")
             st.markdown(f"""
             <div style="background:rgba(99,102,241,0.07);border:1px solid rgba(99,102,241,0.15);
                         border-radius:12px;padding:16px 18px;color:#e2e8f0;font-size:14px;line-height:1.75">
                 {trend_text.replace(chr(10), '<br>')}
             </div>""", unsafe_allow_html=True)
+            yearly = t_data.get("yearly_counts", [])
+            if yearly:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=[pt.get("year") for pt in yearly],
+                    y=[pt.get("count") for pt in yearly],
+                    mode="lines+markers",
+                    line=dict(width=3, color="#22d3ee"),
+                    fill="tozeroy",
+                    fillcolor="rgba(34,211,238,0.14)",
+                    hovertemplate="Year %{x}<br>Papers %{y}<extra></extra>",
+                ))
+                fig.update_layout(
+                    margin=dict(l=20, r=20, t=10, b=10),
+                    height=260,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    xaxis=dict(showgrid=False),
+                    yaxis=dict(gridcolor="rgba(148,163,184,0.15)"),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                render_empty_state("No trend insights generated.", "📈")
         else:
-            st.markdown("<p style='color:#64748b;font-size:14px'>Evaluates how relevant your paper is to current research trends (2024-2025) and suggests missing modern topics.</p>", unsafe_allow_html=True)
-
-        if st.button("▶ Run Trend Analysis", key="btn_trends", use_container_width=True, type="primary"):
-            with st.status("📈 Analyzing Research Trends...", expanded=True) as status:
-                st.write("🌐 Fetching market trends...")
-                r = requests.post(ANA_TRENDS, timeout=120)
-                if r.status_code == 200:
-                    st.session_state.res_trends = r.json()
-                    status.update(label="✅ Trend Analysis Done", state="complete", expanded=False)
-                    _snapshot_mode_local("researcher")
-                    st.rerun()
-                else:
-                    status.update(label="❌ Analysis Failed", state="error")
-                    st.error(f"Error: {r.text[:200]}")
+            render_empty_state("No trend insights generated.", "📈")
+        run_research_call("res_trends", ANA_TRENDS, "▶ Run Trend Analysis", 120, "📈 Analyzing research trends...")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # ── 4. Improvement Suggestions ───────────────────────────
     with row2_c2:
-        st.markdown("""
-        <div class="ai-card" style="opacity:1;animation:none;min-height:200px">
-            <div class="card-header">💡 Improvement Suggestions</div>
-        </div>""", unsafe_allow_html=True)
-
-        s_data = st.session_state.res_suggestions
-        if s_data:
+        st.markdown('<div class="card-shell"><div class="card-head"><span class="card-title">💡 Improvement Suggestions</span></div>', unsafe_allow_html=True)
+        render_status_badges(["cached" if s_data else "live", "success" if s_data else "analyzing"])
+        render_api_alert("res_suggestions")
+        if st.session_state.get("research_loading", {}).get("res_suggestions"):
+            render_skeleton_state(lines=6)
+        elif s_data:
             suggs = s_data.get("suggestions", [])
             if suggs:
                 items_html = "".join(
@@ -1246,22 +1534,11 @@ elif st.session_state.mode == "researcher":
                 )
                 st.markdown(items_html, unsafe_allow_html=True)
             else:
-                st.info("No suggestions generated.")
+                render_empty_state("No suggestions available.", "💡")
         else:
-            st.markdown("<p style='color:#64748b;font-size:14px'>Provides section-wise actionable feedback: abstract clarity, citations, redundancy, methodology, conclusions, and more.</p>", unsafe_allow_html=True)
-
-        if st.button("▶ Generate Suggestions", key="btn_sugg", use_container_width=True, type="primary"):
-            with st.status("💡 Generating Suggestions...", expanded=True) as status:
-                st.write("🧠 Thinking of improvements...")
-                r = requests.post(ANA_SUGGEST, timeout=120)
-                if r.status_code == 200:
-                    st.session_state.res_suggestions = r.json()
-                    status.update(label="✅ Suggestions Generated", state="complete", expanded=False)
-                    _snapshot_mode_local("researcher")
-                    st.rerun()
-                else:
-                    status.update(label="❌ Generation Failed", state="error")
-                    st.error(f"Error: {r.text[:200]}")
+            render_empty_state("No suggestions available.", "💡")
+        run_research_call("res_suggestions", ANA_SUGGEST, "▶ Generate Suggestions", 120, "💡 Generating suggestions...")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # ── 📋 Unified Paper Analysis (new schema) ────────────────
     st.divider()
@@ -1794,174 +2071,82 @@ elif st.session_state.mode == "researcher":
 
 
 # ─────────────────────────────────────────────────────────────
-# 🎓  ACADEMIC EVALUATION ENGINE MODE
-# ─────────────────────────────────────────────────────────────
-elif st.session_state.mode == "eval_engine":
-    st.markdown("### 🎓 Academic Evaluation Engine")
-    st.markdown("Evaluate your paper on a per-question basis with detailed analysis and improvement suggestions.")
-
-    if not st.session_state.loaded_file:
-        st.info("👆 Load a document from the sidebar to run the evaluation engine.")
-        st.stop()
-
-    with st.container(border=True):
-        st.markdown("##### 📝 Questions to Evaluate")
-        q_list = st.session_state.mode_store["eval_engine"]["questions"]
-        q_text = st.text_area("Enter questions (one per line)", value="\n".join(q_list), height=150)
-        new_q_list = [q.strip() for q in q_text.split("\n") if q.strip()]
-        st.session_state.mode_store["eval_engine"]["questions"] = new_q_list
-
-        if st.button("🚀 Run Academic Evaluation", type="primary", use_container_width=True):
-            with st.spinner("🧠 Analyzing paper on a per-question basis..."):
-                try:
-                    r = requests.post(
-                        f"{BASE}/academic/evaluate-questions",
-                        json={
-                            "questions": new_q_list,
-                            "filename": st.session_state.loaded_file
-                        },
-                        timeout=300
-                    )
-                    if r.status_code == 200:
-                        st.session_state.mode_store["eval_engine"]["eval_result"] = r.json().get("results")
-                        st.toast("Evaluation complete!", icon="✅")
-                    else:
-                        st.error(f"Error: {r.text}")
-                except Exception as e:
-                    st.error(f"Network error: {e}")
-
-    st.divider()
-
-    res = st.session_state.mode_store["eval_engine"].get("eval_result")
-    if res:
-        summary = res.get("summary", {})
-        st.markdown(f"#### 📊 Overall Score: {summary.get('overall_score', 0)}/10")
-        
-        sc1, sc2 = st.columns(2)
-        with sc1:
-            st.markdown("##### ✅ Key Strengths")
-            for s in summary.get("key_strengths", []):
-                st.markdown(f"<div class='contrib-item'><span class='contrib-bullet'>•</span>{s}</div>", unsafe_allow_html=True)
-        with sc2:
-            st.markdown("##### ⚠️ Key Weaknesses")
-            for w in summary.get("key_weaknesses", []):
-                st.markdown(f"<div class='weakness-item'><span class='weakness-bullet'>•</span>{w}</div>", unsafe_allow_html=True)
-
-        st.markdown("#### 📋 Detailed Evaluations")
-        for i, ev in enumerate(res.get("evaluations", [])):
-            with st.expander(f"Q{i+1}: {ev.get('question')} — Score: {ev.get('score')}/10"):
-                st.markdown(f"**Answer:**\n{ev.get('answer')}")
-                st.markdown(f"**Justification:**\n{ev.get('justification')}")
-                
-                st.markdown("---")
-                st.markdown("**🔍 Analysis Details**")
-                details = ev.get("details", {})
-                st.markdown(details.get("analysis", ""))
-                
-                col_g, col_i = st.columns(2)
-                with col_g:
-                    st.markdown("**🚩 Gaps**")
-                    gaps = details.get("gaps", [])
-                    if isinstance(gaps, str):
-                        gaps = [gaps] if gaps.strip() else []
-                    if gaps:
-                        for g in gaps:
-                            st.markdown(f"- {g}")
-                    else:
-                        st.markdown("No major research gaps detected.")
-                with col_i:
-                    st.markdown("**💡 Suggestions**")
-                    for imp in details.get("improvements", []):
-                        st.markdown(f"- {imp}")
-                
-                st.markdown("**🛠 Actionable Improvements**")
-                for imp in details.get("improvements", []):
-                    st.markdown(f"<div class='suggestion-item'><span class='suggestion-bullet'>→</span>{imp}</div>", unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div style="text-align:center;padding:50px 20px;color:#64748b">
-            <div style="font-size:44px;margin-bottom:14px">🎓</div>
-            <h3 style="color:#94a3b8;-webkit-text-fill-color:#94a3b8;font-weight:500">Academic Evaluation Engine</h3>
-            <p style="font-size:15px">Enter your research questions above and click "Run Academic Evaluation".</p>
-        </div>""", unsafe_allow_html=True)
-
-
-# ─────────────────────────────────────────────────────────────
 # 📊  ML EVALUATION MODE
 # ─────────────────────────────────────────────────────────────
 elif st.session_state.mode == "eval":
-    st.markdown("### 📊 ML Pipeline Evaluation")
-    st.markdown("Benchmark the system against standard questions to measure accuracy, precision, and recall.")
+    st.markdown(
+        """
+        <div class="dashboard-hero" style="margin-top:-8px;">
+            <h2 class="dashboard-title" style="font-size:28px;">Evaluation Workspace</h2>
+            <p class="dashboard-subtitle">Production-grade benchmarking and academic question diagnostics.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if not st.session_state.loaded_file:
         st.info("👆 Load a document from the sidebar to run evaluation.")
         st.stop()
 
-    eval_mode = st.radio(
-        "Evaluation Mode",
-        options=["quick", "full"],
-        horizontal=True,
-        format_func=lambda m: "Quick (3 queries)" if m == "quick" else "Full (10 queries)"
-    )
+    bench_tab, engine_tab = st.tabs(["📈 Pipeline Benchmark", "🎓 Academic Question Engine"])
 
-    # Run evaluation button
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        if st.button("▶ Run Evaluation", type="primary", use_container_width=True):
-            r = requests.post(
-                EVAL_URL,
-                json={
-                    "username": st.session_state.username,
-                    "filename": st.session_state.loaded_file,
-                    "mode": eval_mode
-                },
-                timeout=120
-            )
-            if r.status_code == 200:
-                st.session_state.eval_job_id = r.json().get("job_id")
-                st.session_state.eval_result = None
-                st.rerun()
-            else:
-                st.error(f"Error: {r.text[:200]}")
-    
-    with col2:
-        st.caption("Quick mode uses 3 representative queries (objective/challenges/solutions). Full mode runs all 10.")
+    with bench_tab:
+        st.markdown('<div class="eval-header"><div><div class="eval-title">Pipeline Benchmark</div><div class="eval-sub">Run quick/full quality checks with model metrics and charted outputs.</div></div></div>', unsafe_allow_html=True)
+        eval_mode = st.radio(
+            "Evaluation Mode",
+            options=["quick", "full"],
+            horizontal=True,
+            format_func=lambda m: "Quick (3 queries)" if m == "quick" else "Full (10 queries)"
+        )
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if st.button("▶ Run Evaluation", type="primary", use_container_width=True):
+                r = requests.post(
+                    EVAL_URL,
+                    json={
+                        "username": st.session_state.username,
+                        "filename": st.session_state.loaded_file,
+                        "mode": eval_mode
+                    },
+                    timeout=120
+                )
+                if r.status_code == 200:
+                    st.session_state.eval_job_id = r.json().get("job_id")
+                    st.session_state.eval_result = None
+                    st.rerun()
+                else:
+                    st.error(f"Error: {r.text[:200]}")
+        with col2:
+            st.caption("Quick mode uses 3 representative queries. Full mode runs all 10.")
 
-    st.divider()
-
-    if st.session_state.get("eval_job_id"):
-        job_id = st.session_state.eval_job_id
-        
-        prog_container = st.empty()
-        
-        with st.spinner("🧪 Evaluation running in background..."):
-            while True:
-                try:
-                    r = requests.get(f"{BASE}/status/{job_id}", timeout=120)
-                    if r.status_code == 200:
-                        status_data = r.json()
-                        status = status_data.get("status")
-                        
-                        if status == "completed":
-                            st.session_state.eval_result = status_data.get("result")
-                            st.session_state.eval_job_id = None
-                            _snapshot_mode_local("eval")
-                            _sync_mode_to_backend("eval")
-                            st.rerun()
-                            break
-                        elif status == "error":
-                            st.error(f"Evaluation failed: {status_data.get('error')}")
-                            st.session_state.eval_job_id = None
-                            break
-                        else:
+        st.divider()
+        if st.session_state.get("eval_job_id"):
+            job_id = st.session_state.eval_job_id
+            prog_container = st.empty()
+            with st.spinner("🧪 Evaluation running in background..."):
+                while True:
+                    try:
+                        r = requests.get(f"{BASE}/status/{job_id}", timeout=120)
+                        if r.status_code == 200:
+                            status_data = r.json()
+                            status = status_data.get("status")
+                            if status == "completed":
+                                st.session_state.eval_result = status_data.get("result")
+                                st.session_state.eval_job_id = None
+                                _snapshot_mode_local("eval")
+                                _sync_mode_to_backend("eval")
+                                st.rerun()
+                                break
+                            elif status == "error":
+                                st.error(f"Evaluation failed: {status_data.get('error')}")
+                                st.session_state.eval_job_id = None
+                                break
                             step = status_data.get("step", "Processing...")
                             curr = status_data.get("progress", 0)
-                            tot = status_data.get("total", 1)
-                            if tot == 0: tot = 1
+                            tot = max(status_data.get("total", 1), 1)
                             pct = curr / tot
-                            
                             prog_container.markdown(f'''
-                            <div style="background:rgba(255,255,255,0.05); padding:20px; border-radius:10px; margin: 20px 0;">
+                            <div class="card-shell" style="min-height:unset; margin:8px 0;">
                                 <h4 style="margin-top:0">⏳ Evaluation in progress...</h4>
                                 <p style="color:#a5b4fc;">{step}</p>
                                 <div style="background:rgba(255,255,255,0.1); height:10px; border-radius:5px;">
@@ -1970,107 +2155,152 @@ elif st.session_state.mode == "eval":
                                 <p style="text-align:right; font-size:12px; margin-top:5px; margin-bottom:0;">{curr}/{tot}</p>
                             </div>
                             ''', unsafe_allow_html=True)
-                            
                             time.sleep(2)
-                    else:
-                        st.error("Lost connection to status endpoint.")
-                        break
-                except Exception as e:
-                    st.error(f"Polling error: {e}")
-                    time.sleep(2)
+                        else:
+                            st.error("Lost connection to status endpoint.")
+                            break
+                    except Exception as e:
+                        st.error(f"Polling error: {e}")
+                        time.sleep(2)
 
-    eval_data = st.session_state.eval_result
+        eval_data = st.session_state.eval_result
+        if not eval_data:
+            render_empty_state("No benchmark evaluation generated yet.", "📊")
+        else:
+            st.markdown('<div class="card-shell" style="min-height:unset;">', unsafe_allow_html=True)
+            ds_info = eval_data.get("dataset_info", {})
+            metrics = eval_data.get("metrics", {})
+            results = eval_data.get("results", [])
+            m_info  = eval_data.get("model_info", {})
 
-    if not eval_data:
-        st.markdown("""
-        <div style="text-align:center;padding:50px 20px;color:#64748b">
-            <div style="font-size:44px;margin-bottom:14px">📊</div>
-            <h3 style="color:#94a3b8;-webkit-text-fill-color:#94a3b8;font-weight:500">System Evaluation</h3>
-            <p style="font-size:15px">Click "Run Full Evaluation" to benchmark the RAG pipeline.</p>
-        </div>""", unsafe_allow_html=True)
-    else:
-        ds_info = eval_data.get("dataset_info", {})
-        metrics = eval_data.get("metrics", {})
-        results = eval_data.get("results", [])
-        m_info  = eval_data.get("model_info", {})
-
-        # ── 1. Key Metrics Cards ──
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Accuracy", f"{metrics.get('accuracy', 0):.1%}", help="Percentage of correct answers (similarity ≥ threshold)")
-        c2.metric("Precision", f"{metrics.get('precision', 0):.1%}", help="True Positives / (True Positives + False Positives)")
-        c3.metric("Recall", f"{metrics.get('recall', 0):.1%}", help="True Positives / (True Positives + False Negatives)")
-        c4.metric("F1 Score", f"{metrics.get('f1', 0):.1%}", help="Harmonic mean of precision and recall")
-        st.caption(
-            f"Avg response time: {metrics.get('total_time_s', 0) / max(metrics.get('total', 1), 1):.2f}s | "
-            f"Cache hit rate: {metrics.get('cache_hit_rate', 0) * 100:.1f}% | "
-            f"Total evaluation time: {metrics.get('total_time_s', 0):.2f}s"
-        )
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        col_dist, col_acc, col_info = st.columns([3, 2, 2])
-
-        # ── 2. Visualizations ──
-        with col_dist:
-            st.markdown("##### 📈 Similarity Distribution")
-            scores = eval_data.get("scores", [])
-            if scores:
-                fig = px.histogram(
-                    x=scores,
-                    nbins=10,
-                    range_x=[0, 1],
-                    color_discrete_sequence=['#818cf8'],
-                    labels={'x': 'Cosine Similarity', 'count': 'Frequency'},
-                    title="Score Distribution"
-                )
-                fig.add_vline(x=metrics.get('threshold', 0.6), line_dash="dash", line_color="red", annotation_text="Threshold")
-                fig.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=300)
-                st.plotly_chart(fig, use_container_width=True)
-
-        with col_acc:
-            st.markdown("##### 🎯 Accuracy Chart")
-            correct = metrics.get('correct', 0)
-            total = metrics.get('total', 1)
-            incorrect = total - correct
-            
-            fig_acc = px.pie(
-                names=['Correct', 'Incorrect'],
-                values=[correct, incorrect],
-                color_discrete_sequence=['#10b981', '#ef4444'],
-                hole=0.4,
-                title="Model Accuracy"
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Accuracy", f"{metrics.get('accuracy', 0):.1%}", help="Percentage of correct answers (similarity ≥ threshold)")
+            c2.metric("Precision", f"{metrics.get('precision', 0):.1%}", help="True Positives / (True Positives + False Positives)")
+            c3.metric("Recall", f"{metrics.get('recall', 0):.1%}", help="True Positives / (True Positives + False Negatives)")
+            c4.metric("F1 Score", f"{metrics.get('f1', 0):.1%}", help="Harmonic mean of precision and recall")
+            st.caption(
+                f"Avg response time: {metrics.get('total_time_s', 0) / max(metrics.get('total', 1), 1):.2f}s | "
+                f"Cache hit rate: {metrics.get('cache_hit_rate', 0) * 100:.1f}% | "
+                f"Total evaluation time: {metrics.get('total_time_s', 0):.2f}s"
             )
-            fig_acc.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=300)
-            st.plotly_chart(fig_acc, use_container_width=True)
 
-        # ── 3. Dataset & Model Info ──
-        with col_info:
-            st.markdown("##### 📚 Dataset")
-            st.markdown(f"- **Total Chunks:** {ds_info.get('total_chunks', 0)}")
-            st.markdown(f"- **Train/Test Split:** {ds_info.get('split_ratio', '')}")
-            st.markdown(f"- **Eval Questions:** {ds_info.get('eval_questions', 0)}")
-            domains = ds_info.get('domains', [])
-            if domains:
-                # Show first 3 domains to avoid taking up too much vertical space, or show all in small text
-                st.markdown(f"- **Topics:** {', '.join(domains[:3])}...")
-            
-            st.markdown("##### ⚙️ Model Architecture")
-            st.markdown(f"- **LLM:** `{m_info.get('llm', '')}`")
-            st.markdown(f"- **Embedder:** `{m_info.get('embedding_model', '')}`")
-            st.markdown(f"- **Re-ranker:** `{m_info.get('reranking_model', '')}`")
-            st.caption(m_info.get('fine_tuning', ''))
+            st.markdown("<br>", unsafe_allow_html=True)
+            col_dist, col_acc, col_info = st.columns([3, 2, 2])
+            with col_dist:
+                st.markdown("##### 📈 Similarity Distribution")
+                scores = eval_data.get("scores", [])
+                if scores:
+                    fig = px.histogram(
+                        x=scores,
+                        nbins=10,
+                        range_x=[0, 1],
+                        color_discrete_sequence=['#818cf8'],
+                        labels={'x': 'Cosine Similarity', 'count': 'Frequency'},
+                        title="Score Distribution"
+                    )
+                    fig.add_vline(x=metrics.get('threshold', 0.6), line_dash="dash", line_color="red", annotation_text="Threshold")
+                    fig.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=300)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    render_empty_state("No similarity distribution available.", "📈")
 
-        # ── 4. Detailed Results Table ──
-        st.markdown("##### 📋 Detailed Evaluation Results")
-        
-        for res in results:
-            sim   = res.get("similarity", 0)
-            is_ok = res.get("correct", False)
-            icon  = "✅" if is_ok else "❌"
-            color = "#10b981" if is_ok else "#ef4444"
-            
-            with st.expander(f"{icon} {res.get('domain', 'Question')} (Score: {sim:.2f})"):
-                st.markdown(f"**Query:** {res.get('query', '')}")
-                st.markdown(f"**Answer:**\n> {res.get('model_answer', '')}")
-                st.markdown(f"**Response Time:** {res.get('response_time_s', res.get('time_taken', 0))} s")
-                st.markdown(f"**Cache:** {res.get('cache_status', 'Hit' if res.get('cached') else 'Miss')}")
-                st.markdown(f"**Similarity Score:** {res.get('similarity_score', sim):.4f}")
+            with col_acc:
+                st.markdown("##### 🎯 Accuracy Chart")
+                correct = metrics.get('correct', 0)
+                total = metrics.get('total', 1)
+                incorrect = total - correct
+                fig_acc = px.pie(
+                    names=['Correct', 'Incorrect'],
+                    values=[correct, incorrect],
+                    color_discrete_sequence=['#10b981', '#ef4444'],
+                    hole=0.4,
+                    title="Model Accuracy"
+                )
+                fig_acc.update_layout(margin=dict(l=20, r=20, t=40, b=20), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=300)
+                st.plotly_chart(fig_acc, use_container_width=True)
+
+            with col_info:
+                st.markdown("##### 📚 Dataset")
+                st.markdown(f"- **Total Chunks:** {ds_info.get('total_chunks', 0)}")
+                st.markdown(f"- **Train/Test Split:** {ds_info.get('split_ratio', '')}")
+                st.markdown(f"- **Eval Questions:** {ds_info.get('eval_questions', 0)}")
+                domains = ds_info.get('domains', [])
+                if domains:
+                    st.markdown(f"- **Topics:** {', '.join(domains[:3])}...")
+                st.markdown("##### ⚙️ Model Architecture")
+                st.markdown(f"- **LLM:** `{m_info.get('llm', '')}`")
+                st.markdown(f"- **Embedder:** `{m_info.get('embedding_model', '')}`")
+                st.markdown(f"- **Re-ranker:** `{m_info.get('reranking_model', '')}`")
+                st.caption(m_info.get('fine_tuning', ''))
+
+            st.markdown("##### 📋 Detailed Evaluation Results")
+            if results:
+                for res in results:
+                    sim   = res.get("similarity", 0)
+                    is_ok = res.get("correct", False)
+                    icon  = "✅" if is_ok else "❌"
+                    with st.expander(f"{icon} {res.get('domain', 'Question')} (Score: {sim:.2f})"):
+                        st.markdown(f"**Query:** {res.get('query', '')}")
+                        st.markdown(f"**Answer:**\n> {res.get('model_answer', '')}")
+                        st.markdown(f"**Response Time:** {res.get('response_time_s', res.get('time_taken', 0))} s")
+                        st.markdown(f"**Cache:** {res.get('cache_status', 'Hit' if res.get('cached') else 'Miss')}")
+                        st.markdown(f"**Similarity Score:** {res.get('similarity_score', sim):.4f}")
+            else:
+                render_empty_state("No benchmark question results available.", "🧪")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    with engine_tab:
+        st.markdown('<div class="eval-header"><div><div class="eval-title">Academic Question Engine</div><div class="eval-sub">Evaluate custom research questions with reasoning, gaps, and improvements.</div></div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-shell" style="min-height:unset;">', unsafe_allow_html=True)
+        st.markdown("##### 📝 Questions to Evaluate")
+        q_list = st.session_state.mode_store["eval"].get("questions", DEFAULTS["mode_store"]["eval"]["questions"])
+        q_text = st.text_area("Enter questions (one per line)", value="\n".join(q_list), height=150, key="eval_engine_questions")
+        new_q_list = [q.strip() for q in q_text.split("\n") if q.strip()]
+        st.session_state.mode_store["eval"]["questions"] = new_q_list
+
+        if st.button("🚀 Run Academic Evaluation", key="btn_eval_engine", type="primary", use_container_width=True):
+            with st.spinner("🧠 Analyzing paper on a per-question basis..."):
+                try:
+                    r = requests.post(
+                        f"{BASE}/academic/evaluate-questions",
+                        json={"questions": new_q_list, "filename": st.session_state.loaded_file},
+                        timeout=300,
+                    )
+                    if r.status_code == 200:
+                        st.session_state.mode_store["eval"]["engine_result"] = r.json().get("results")
+                        _snapshot_mode_local("eval")
+                        st.toast("Evaluation complete!", icon="✅")
+                    else:
+                        st.session_state.setdefault("eval_errors", {})["engine"] = r.text[:240]
+                        st.error(f"Error: {r.text}")
+                except Exception as e:
+                    st.session_state.setdefault("eval_errors", {})["engine"] = str(e)
+                    st.error(f"Network error: {e}")
+
+        st.divider()
+        if st.session_state.get("eval_errors", {}).get("engine"):
+            st.markdown(f"<div class='api-alert'><span>⚠️</span><span>{strip_html(st.session_state['eval_errors']['engine'])}</span></div>", unsafe_allow_html=True)
+        res = st.session_state.mode_store["eval"].get("engine_result")
+        if res:
+            summary = res.get("summary", {})
+            st.markdown(f"#### 📊 Overall Score: {summary.get('overall_score', 0)}/10")
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                st.markdown("##### ✅ Key Strengths")
+                for s in summary.get("key_strengths", []):
+                    st.markdown(f"<div class='contrib-item'><span class='contrib-bullet'>•</span>{s}</div>", unsafe_allow_html=True)
+            with sc2:
+                st.markdown("##### ⚠️ Key Weaknesses")
+                for w in summary.get("key_weaknesses", []):
+                    st.markdown(f"<div class='weakness-item'><span class='weakness-bullet'>•</span>{w}</div>", unsafe_allow_html=True)
+            st.markdown("#### 📋 Detailed Evaluations")
+            for i, ev in enumerate(res.get("evaluations", [])):
+                with st.expander(f"Q{i+1}: {ev.get('question')} — Score: {ev.get('score')}/10"):
+                    st.markdown(f"**Answer:**\n{ev.get('answer')}")
+                    st.markdown(f"**Justification:**\n{ev.get('justification')}")
+                    details = ev.get("details", {})
+                    st.markdown("**🔍 Analysis Details**")
+                    st.markdown(details.get("analysis", ""))
+        else:
+            render_empty_state("No academic question evaluation generated yet.", "🎓")
+        st.markdown("</div>", unsafe_allow_html=True)
