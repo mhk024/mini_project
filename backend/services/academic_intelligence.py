@@ -23,7 +23,7 @@ from typing import Optional
 
 from services.semantic_scholar import get_influential_papers
 from services.openalex import get_related_concepts
-from services.academic_search import search_semantic_scholar, search_openalex, merge_results
+from services.academic_search import search_semantic_scholar, search_openalex
 from services.cache_manager import cache_manager
 from services.async_utils import run_with_timeout
 
@@ -458,25 +458,93 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
     start_time = time.time()
     metadata = extract_paper_metadata(document_text)
     topic = extract_research_topic(document_text)
-    logger.info(f"RESEARCH_TOPIC={topic}")
+    logger.info("[RESEARCH] Topic extracted: %s", topic)
 
-    # Parallel tasks: external paper search + concepts
-    tasks = {
-        "ss_list": search_semantic_scholar(topic, limit=5),
-        "oa_list": search_openalex(topic, limit=5),
-        "ss_influential": get_influential_papers(topic, limit=5),
-        "concepts": get_related_concepts(topic, limit=8),
-    }
+    # Safe defaults to prevent researcher pipeline crashes on API/network issues.
+    ss_similar = []
+    oa_similar = []
+    similar_papers = []
+    trend_data = {}
+    suggestions = []
+    overlap_analysis = {}
+    warnings = []
+    ss_influential = []
+    oa_concepts = []
+    oa_works = []
 
-    results = {}
-    for name, coro in tasks.items():
-        results[name] = await run_with_timeout(coro, 10, fallback_value=[])
+    try:
+        ss_similar = await run_with_timeout(
+            search_semantic_scholar(topic, limit=5),
+            10,
+            fallback_value=[],
+        ) or []
+    except Exception:
+        logger.exception("[RESEARCH] Semantic Scholar search failed for topic=%s", topic)
+        ss_similar = []
+    logger.info("[RESEARCH] Semantic Scholar papers: %d", len(ss_similar))
 
-    ss_list = results["ss_list"] or []
-    oa_list = results["oa_list"] or []
-    merged_papers = merge_results(ss_list, oa_list, limit=8)
-    ss_influential = results["ss_influential"] or []
-    oa_concepts = results["concepts"] or []
+    try:
+        oa_similar = await run_with_timeout(
+            search_openalex(topic, limit=5),
+            10,
+            fallback_value=[],
+        ) or []
+    except Exception:
+        logger.exception("[RESEARCH] OpenAlex search failed for topic=%s", topic)
+        oa_similar = []
+    logger.info("[RESEARCH] OpenAlex papers: %d", len(oa_similar))
+
+    try:
+        ss_influential = await run_with_timeout(
+            get_influential_papers(topic, limit=5),
+            10,
+            fallback_value=[],
+        ) or []
+    except Exception:
+        logger.exception("[RESEARCH] Influential papers fetch failed for topic=%s", topic)
+        ss_influential = []
+
+    try:
+        oa_concepts = await run_with_timeout(
+            get_related_concepts(topic, limit=8),
+            10,
+            fallback_value=[],
+        ) or []
+    except Exception:
+        logger.exception("[RESEARCH] Related concepts fetch failed for topic=%s", topic)
+        oa_concepts = []
+
+    # Merge -> dedupe -> schema guard -> empty filter
+    similar_papers = ss_similar + oa_similar
+    normalized_papers = []
+    seen_titles = set()
+    for paper in similar_papers:
+        if not isinstance(paper, dict):
+            continue
+        title = (paper.get("title") or "").strip()
+        if not title:
+            continue
+        key = title.lower()
+        if key in seen_titles:
+            continue
+        seen_titles.add(key)
+        normalized_papers.append({
+            "title": title,
+            "authors": paper.get("authors") or [],
+            "year": paper.get("year"),
+            "citation_count": paper.get("citation_count", 0) or 0,
+            "venue": paper.get("venue") or "",
+            "url": paper.get("url") or "",
+            "abstract": paper.get("abstract") or "",
+            "source_api": paper.get("source_api") or "",
+        })
+
+    merged_papers = normalized_papers[:8]
+    oa_works = oa_similar
+    logger.info("[RESEARCH] Similar papers merged: %d", len(merged_papers))
+
+    if not merged_papers:
+        warnings.append("External academic APIs unavailable")
 
     quality_scores = compute_enhanced_quality(metadata, merged_papers, [])
     novelty_score = quality_scores["novelty_score"]
@@ -496,7 +564,7 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
 
     if not merged_papers:
         fallback_msg = "No strong academic matches found."
-        domain_trends = {
+        trend_data = {
             "keyword": topic,
             "warning_message": fallback_msg,
             "overall_trends": {"keyword": topic, "yearly_counts": [], "total": 0, "trend": "unknown"},
@@ -524,7 +592,7 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
                 else:
                     trend_label = "stable"
 
-        domain_trends = {
+        trend_data = {
             "keyword": topic,
             "warning_message": "",
             "overall_trends": {
@@ -538,13 +606,13 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
             "render": total_pubs > 0,
         }
         if total_pubs == 0:
-            domain_trends["warning_message"] = "Not enough academic data available for trend analysis."
+            trend_data["warning_message"] = "Not enough academic data available for trend analysis."
 
         suggestions = generate_research_suggestions(
             metadata,
             merged_papers,
             [],
-            domain_trends.get("overall_trends", {}),
+            trend_data.get("overall_trends", {}),
             missing_citations,
             novelty_score,
             quality_scores,
@@ -556,23 +624,31 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
                 "suggestion": "No strong academic matches found.",
                 "details": "Try uploading a paper with a clearer abstract/title for better discovery."
             }]
-
+    overlap_analysis = {
+        "enabled": bool(merged_papers),
+        "status": "insufficient_reference_data" if not merged_papers else "available",
+        "paper_count": len(merged_papers),
+    }
 
     elapsed = round(time.time() - start_time, 2)
     final = {
         "metadata":           metadata,
-        "similar_papers":     ss_similar,
+        "similar_papers":     merged_papers,
         "influential_papers": ss_influential,
         "oa_works":           oa_works,
         "quality_index":      quality_scores,
         "novelty_score":      novelty_score,
-        "trends":             domain_trends,
+        "trends":             trend_data,
         "related_concepts":   oa_concepts,
         "missing_citations":  missing_citations,
         "suggestions":        suggestions,
+        "overlap_analysis":   overlap_analysis,
+        "warnings":           warnings,
+        "success":            True,
         "analysis_time_s":    elapsed,
         "status":             "success",
     }
 
+    logger.info("[RESEARCH] Analysis completed successfully")
     await cache_manager.set(doc_hash, final, category="academic_analysis")
     return final

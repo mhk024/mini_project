@@ -1472,6 +1472,8 @@ elif st.session_state.mode == "researcher":
                 </div>"""
             cards_html += '</div>'
             st.markdown(cards_html, unsafe_allow_html=True)
+        elif sim_data:
+            st.info("No similar papers found.")
         else:
             st.info("Click 'Run Full Academic Analysis' above to discover similar papers from Semantic Scholar and OpenAlex.")
 
@@ -1631,6 +1633,8 @@ elif st.session_state.mode == "researcher":
                                 <div style="font-size:11px;color:#94a3b8">{tw.get("works_count",0):,} works</div>
                             </div>
                             """, unsafe_allow_html=True)
+        elif trend_data:
+            st.info("Trend analysis unavailable.")
         else:
             st.info("Click 'Run Full Academic Analysis' to see yearly publication trends and trending keywords.")
 
@@ -1665,6 +1669,8 @@ elif st.session_state.mode == "researcher":
                         <div style="color:#cbd5e1;font-size:12px;margin-top:4px">{p.get('reason','')}</div>
                     </div>
                     """, unsafe_allow_html=True)
+        elif sugg_data:
+            st.info("Suggestions unavailable.")
         else:
             st.info("Click 'Run Full Academic Analysis' to get actionable suggestions and missing citations.")
 
