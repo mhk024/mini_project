@@ -675,16 +675,26 @@ async def analyze_plagiarism():
         papers = analysis.get("similar_papers", []) or []
 
         overlap_info = analysis.get("overlap_analysis", {}) or {}
+        paper_count = len(papers)
+        has_reference_data = paper_count > 0 and overlap_info.get("status") == "available"
+
         avg_overlap = float(overlap_info.get("similarity_percent", 0.0) or 0.0) / 100.0
-        if avg_overlap >= 0.45:
-            level = "High conceptual similarity"
-        elif avg_overlap >= 0.22:
-            level = "Moderate thematic overlap"
+        if has_reference_data:
+            if avg_overlap >= 0.45:
+                level = "High conceptual similarity"
+            elif avg_overlap >= 0.22:
+                level = "Moderate thematic overlap"
+            else:
+                level = "Low overlap"
         else:
-            level = "Low overlap"
+            level = "Insufficient reference data"
 
         novelty_value = analysis.get("novelty_score")
-        novelty_text = f"{round(float(novelty_value) * 10, 1)}%" if novelty_value is not None else "0%"
+        novelty_text = (
+            f"{round(float(novelty_value) * 10, 1)}%"
+            if novelty_value is not None and has_reference_data
+            else "N/A"
+        )
         overlap_text = overlap_info.get("plagiarism_message") or "Limited academic comparison data available"
 
         return {
@@ -695,11 +705,13 @@ async def analyze_plagiarism():
                 "similar_papers_summary": [p.get("title", "") for p in papers[:5] if p.get("title")],
                 "missing_references": [m.get("title", "") for m in (analysis.get("missing_citations") or [])[:5] if m.get("title")],
                 "improvements": [s.get("suggestion", "") for s in (analysis.get("suggestions") or [])[:5] if s.get("suggestion")],
+                "insufficient_data": not has_reference_data,
             },
             "literature_overlap_insights": {
                 "level": level,
                 "average_overlap_score": round(avg_overlap, 3),
-                "reference_paper_count": len(papers),
+                "reference_paper_count": paper_count,
+                "insufficient_data": not has_reference_data,
             }
         }
     except HTTPException:
@@ -715,9 +727,18 @@ async def analyze_trends():
         from services.academic_intelligence import run_full_academic_analysis_async
         try:
             acad_res = await run_full_academic_analysis_async(text)
-            trends_summary = acad_res.get("trends", {}).get("warning_message", "") or "Highly aligned with modern research."
+            trends_payload = acad_res.get("trends", {}) or {}
+            trends_summary = trends_payload.get("warning_message", "") or "Highly aligned with modern research."
+            insufficient_trend_data = bool(trends_payload.get("insufficient_data"))
         except Exception:
             trends_summary = "Stable"
+            insufficient_trend_data = True
+
+        if insufficient_trend_data:
+            return {
+                "trend_analysis": "Insufficient academic trend data. We could not retrieve enough publication history for a reliable trend analysis.",
+                "insufficient_data": True,
+            }
             
         prompt = f"Analyze this research paper excerpt and provide a high-quality trend analysis paragraph (3-4 sentences) outlining its relevance to recent breakthroughs (2024-2026), modern methodologies, and industry standards: {text[:2000]}"
         try:
@@ -727,7 +748,7 @@ async def analyze_trends():
         except Exception as e:
             analysis_text = f"The paper's theme aligns with contemporary advancements. Trend: {trends_summary}."
             
-        return {"trend_analysis": analysis_text}
+        return {"trend_analysis": analysis_text, "insufficient_data": False}
     except HTTPException:
         raise
     except Exception as e:
@@ -738,11 +759,26 @@ async def analyze_trends():
 async def analyze_suggestions():
     try:
         text = await _get_active_document_text()
-        from research_analyzer import analyze_paper_async
-        result = await analyze_paper_async(get_llm(), text)
-        if "error" in result:
-            raise HTTPException(status_code=500, detail=result["error"])
-        return {"suggestions": result.get("suggestions", [])}
+        from services.academic_intelligence import run_full_academic_analysis_async
+        result = await run_full_academic_analysis_async(text)
+        if result.get("status") == "error":
+            raise HTTPException(status_code=500, detail=result.get("message", "Analysis failed"))
+
+        papers = result.get("similar_papers", []) or []
+        insufficient_data = len(papers) == 0
+        structured_suggestions = result.get("suggestions", []) or []
+        suggestions = []
+        for item in structured_suggestions:
+            if isinstance(item, dict):
+                text_value = str(item.get("suggestion", "")).strip()
+                if text_value:
+                    suggestions.append(text_value)
+            elif isinstance(item, str) and item.strip():
+                suggestions.append(item.strip())
+
+        if insufficient_data and not suggestions:
+            suggestions = ["Insufficient academic comparison data for reliable suggestions."]
+        return {"suggestions": suggestions, "insufficient_data": insufficient_data}
     except HTTPException:
         raise
     except Exception as e:

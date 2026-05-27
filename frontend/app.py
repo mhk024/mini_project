@@ -180,46 +180,82 @@ h1 {
     border-color: rgba(99, 102, 241, 0.3);
     box-shadow: var(--shadow-hover, 0 14px 34px rgba(99, 102, 241, 0.12));
 }
+.paper-title {
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.4;
+}
+.paper-meta {
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-top: 6px;
+}
+.paper-abstract {
+    color: var(--text-primary);
+    opacity: 0.92;
+    font-size: 13px;
+    margin-top: 10px;
+    line-height: 1.55;
+}
+.paper-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+.paper-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+}
+.badge-api {
+    color: #60a5fa;
+    background: rgba(96, 165, 250, 0.12);
+    border-color: rgba(96, 165, 250, 0.28);
+}
+.badge-cite {
+    color: #a78bfa;
+    background: rgba(167, 139, 250, 0.12);
+    border-color: rgba(167, 139, 250, 0.28);
+}
+.paper-link {
+    color: #818cf8;
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: auto;
+}
+.paper-link:hover {
+    color: #6366f1;
+    text-decoration: underline;
+}
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <style>
 :root {
-    --bg-primary: #05070f;
-    --bg-card: rgba(15, 23, 42, 0.55);
-    --bg-sidebar: linear-gradient(180deg, rgba(8, 13, 28, 0.98), rgba(10, 16, 34, 0.92));
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --border-color: rgba(148, 163, 184, 0.2);
-    --shadow-soft: 0 12px 34px rgba(2, 6, 23, 0.36);
-    --shadow-hover: 0 14px 34px rgba(99, 102, 241, 0.12);
+    /* Keep custom palette synced with Streamlit's active theme (System/Light/Dark). */
+    --bg-primary: var(--background-color, #05070f);
+    --bg-card: color-mix(in srgb, var(--secondary-background-color, #0f172a) 88%, transparent);
+    --bg-sidebar: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--secondary-background-color, #0f172a) 94%, transparent),
+        color-mix(in srgb, var(--background-color, #05070f) 96%, transparent)
+    );
+    --text-primary: var(--text-color, #f8fafc);
+    --text-secondary: color-mix(in srgb, var(--text-color, #f8fafc) 66%, transparent);
+    --border-color: color-mix(in srgb, var(--text-color, #f8fafc) 18%, transparent);
+    --shadow-soft: 0 12px 34px rgba(2, 6, 23, 0.20);
+    --shadow-hover: 0 14px 34px rgba(99, 102, 241, 0.16);
     --radius-lg: 18px;
     --radius-md: 14px;
     --radius-sm: 12px;
     --focus-ring: 0 0 0 3px rgba(99, 102, 241, 0.22);
-}
-@media (prefers-color-scheme: light) {
-    :root {
-        --bg-primary: #f5f7fb;
-        --bg-card: #ffffff;
-        --bg-sidebar: linear-gradient(180deg, #ffffff, #f8fafc);
-        --text-primary: #111827;
-        --text-secondary: #4b5563;
-        --border-color: rgba(15, 23, 42, 0.12);
-        --shadow-soft: 0 8px 20px rgba(15, 23, 42, 0.08);
-        --shadow-hover: 0 12px 26px rgba(99, 102, 241, 0.14);
-    }
-}
-[data-theme="light"] {
-    --bg-primary: #f5f7fb;
-    --bg-card: #ffffff;
-    --bg-sidebar: linear-gradient(180deg, #ffffff, #f8fafc);
-    --text-primary: #111827;
-    --text-secondary: #4b5563;
-    --border-color: rgba(15, 23, 42, 0.12);
-    --shadow-soft: 0 8px 20px rgba(15, 23, 42, 0.08);
-    --shadow-hover: 0 12px 26px rgba(99, 102, 241, 0.14);
 }
 [data-testid="stAppViewContainer"] { background: var(--bg-primary); }
 [data-testid="stHeader"], [data-testid="stToolbar"] { background: transparent; }

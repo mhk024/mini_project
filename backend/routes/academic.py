@@ -82,19 +82,20 @@ async def _get_document_text_async(filename: Optional[str] = None) -> str:
 async def similar_papers_endpoint(request: AnalysisRequest):
     try:
         text = await _get_document_text_async(request.filename)
-        topic_data = extract_research_topic(text)
-        raw = request.query or topic_data.get("semantic_query") or topic_data.get("title", "") or text[:3000]
-        title = generate_search_query(raw)
-        metadata = extract_paper_metadata(text)
-
-        # Parallel fetch using semantic query for precision
-        ss_task = get_similar_papers(title, metadata.get("abstract", ""), limit=10)
-        oa_task = search_works(title, limit=10)
-        
-        ss_papers, oa_papers = await asyncio.gather(ss_task, oa_task)
-        
-        merged = ss_papers + oa_papers
-        return {"status": "success", "papers": merged[:15]}
+        # Reuse full academic pipeline so similar-paper retrieval benefits
+        # from semantic + keyword + emergency fallback query strategies.
+        analysis = await run_full_academic_analysis_async(text)
+        papers = (analysis.get("similar_papers") or [])[:15]
+        insufficient_data = len(papers) == 0
+        return {
+            "status": "success",
+            "papers": papers,
+            "paper_count": len(papers),
+            "insufficient_data": insufficient_data,
+            "message": "No similar papers found for this query." if insufficient_data else "",
+            "extracted_topic": analysis.get("extracted_topic", ""),
+            "fallback_query_used": analysis.get("fallback_query_used", ""),
+        }
     except HTTPException:
         raise
     except Exception as e:

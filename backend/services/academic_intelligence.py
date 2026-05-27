@@ -860,7 +860,10 @@ def _build_multi_strategy_queries(topic_data: dict) -> list[str]:
     # Keep all strategies anchored to the cleaned semantic query.
     shorter = " ".join(semantic_q.split()[:6]).strip()
     domain_only = clean_search_query(topic_data.get("domain", ""), max_chars=80)
-    queries = [semantic_q, shorter, domain_only]
+    title_query = _compress_query(topic_data.get("title", ""), 100)
+    kw_tokens = [str(k).strip() for k in (topic_data.get("keywords") or []) if str(k).strip()]
+    keyword_query = _compress_query(" ".join(kw_tokens[:8]), 100)
+    queries = [semantic_q, shorter, title_query, keyword_query, domain_only]
     ordered = []
     seen = set()
     for q in queries:
@@ -872,6 +875,41 @@ def _build_multi_strategy_queries(topic_data: dict) -> list[str]:
         seen.add(key)
         ordered.append(q)
     return ordered[:4]
+
+
+def _build_emergency_queries(topic_data: dict) -> list[str]:
+    """Last-resort broad queries when strict semantic matching yields zero papers."""
+    queries = []
+    semantic_q = _compress_query(topic_data.get("semantic_query", ""), 100)
+    title_q = _compress_query(topic_data.get("title", ""), 100)
+    domain = clean_search_query(topic_data.get("domain", ""), max_chars=80)
+    subdomain = clean_search_query(topic_data.get("subdomain", ""), max_chars=80)
+
+    if semantic_q:
+        queries.append(" ".join(semantic_q.split()[:4]))
+    if title_q:
+        queries.append(" ".join(title_q.split()[:5]))
+    if subdomain:
+        queries.append(subdomain)
+    if domain:
+        queries.append(domain)
+    queries.extend([
+        "artificial intelligence machine learning",
+        "deep learning neural networks",
+    ])
+
+    uniq = []
+    seen = set()
+    for q in queries:
+        qq = (q or "").strip()
+        if not qq:
+            continue
+        key = qq.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(qq)
+    return uniq[:6]
 
 
 async def _multi_strategy_academic_search(topic_data: dict, per_source_limit: int = 8) -> tuple[list[dict], str, str]:
@@ -909,6 +947,22 @@ async def _multi_strategy_academic_search(topic_data: dict, per_source_limit: in
         all_papers.extend(ss_batch)
         all_papers.extend(oa_batch)
         logger.info("[SIMILAR PAPERS FOUND] strategy=%s ss=%d oa=%d cumulative=%d", label, len(ss_batch), len(oa_batch), len(all_papers))
+
+    # Emergency retry path for noisy/overfitted queries.
+    if not all_papers:
+        for q in _build_emergency_queries(topic_data):
+            logger.info("[SEMANTIC QUERY] strategy=emergency query=%s", q)
+            ss_batch = await run_with_timeout(search_semantic_scholar(q, limit=max(6, per_source_limit)), 12, fallback_value=[]) or []
+            oa_batch = await run_with_timeout(search_openalex(q, limit=max(6, per_source_limit)), 12, fallback_value=[]) or []
+            if ss_batch and not used_ss_query:
+                used_ss_query = q
+            if oa_batch and not used_oa_query:
+                used_oa_query = q
+            all_papers.extend(ss_batch)
+            all_papers.extend(oa_batch)
+            logger.info("[SIMILAR PAPERS FOUND] strategy=emergency ss=%d oa=%d cumulative=%d", len(ss_batch), len(oa_batch), len(all_papers))
+            if all_papers:
+                break
 
     return all_papers, used_ss_query, used_oa_query
 
