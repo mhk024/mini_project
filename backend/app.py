@@ -259,6 +259,7 @@ async def health():
 async def ask(request: QuestionRequest):
     logger.info("Entry /ask: %s", request)
     start_time = time.time()
+    answer_text = ""
     try:
         if request.filename:
             await _load_context_async(request.filename)
@@ -269,8 +270,9 @@ async def ask(request: QuestionRequest):
         
         if cached:
             result = cached
+            answer_text = result.get("answer", "")
         else:
-            answer = await asyncio.to_thread(state.qa_chain.invoke, {"question": request.question})
+            answer = await state.qa_chain(request.question, mode=request.mode)
             answer_text = answer.get("answer", "")
             
             # Extract key points and summary
@@ -281,10 +283,11 @@ async def ask(request: QuestionRequest):
             result = {
                 "answer": answer_text,
                 "key_points": key_points,
-                "summary": {
+                "summary": answer.get("summary", {
                     "short": (sentences[0] + ".") if sentences else "",
                     "detailed": answer_text
-                },
+                }),
+                "sources": answer.get("sources", []),
                 "execution_time_ms": round((time.time() - start_time) * 1000, 2)
             }
             await cache_manager.set(ckey, result, category="rag_chat")
@@ -348,11 +351,16 @@ async def ask(request: QuestionRequest):
         result.setdefault('answer', answer_text)
 
         return result
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error("Error in /ask: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Error in /ask: %s", e, exc_info=True)
+        detail = e.detail if isinstance(e, HTTPException) else str(e)
+        return {
+            "answer": f"An error occurred while processing your request: {detail}",
+            "key_points": ["Request could not be completed."],
+            "summary": {"short": "Error occurred", "detailed": detail},
+            "sources": [],
+            "execution_time_ms": round((time.time() - start_time) * 1000, 2)
+        }
 
 
 @app.post("/evaluate")
