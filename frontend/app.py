@@ -1861,8 +1861,14 @@ elif st.session_state.mode == "eval_engine":
                 col_g, col_i = st.columns(2)
                 with col_g:
                     st.markdown("**🚩 Gaps**")
-                    for g in details.get("gaps", []):
-                        st.markdown(f"- {g}")
+                    gaps = details.get("gaps", [])
+                    if isinstance(gaps, str):
+                        gaps = [gaps] if gaps.strip() else []
+                    if gaps:
+                        for g in gaps:
+                            st.markdown(f"- {g}")
+                    else:
+                        st.markdown("No major research gaps detected.")
                 with col_i:
                     st.markdown("**💡 Suggestions**")
                     for imp in details.get("improvements", []):

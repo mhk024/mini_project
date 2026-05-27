@@ -19,9 +19,12 @@ import hashlib
 import logging
 import asyncio
 import math
+import os
 from collections import Counter
 from datetime import datetime
 from typing import Optional
+
+from groq import Groq
 
 from services.semantic_scholar import get_influential_papers
 from services.openalex import get_related_concepts, get_topic_trends
@@ -59,6 +62,9 @@ TOPIC_STOPWORDS = {
     "our", "its", "also", "such", "more", "most", "than", "over", "article", "authors",
 }
 MAX_QUERY_LENGTH = 120
+DEFAULT_FALLBACK_QUERY = "artificial intelligence machine learning"
+
+_groq_client = None
 
 # Journal / website / boilerplate tokens that often pollute extracted "titles"
 NOISE_TOKENS = {
@@ -84,6 +90,83 @@ PHRASE_BOOST = [
     "transformer models",
     "large language models",
 ]
+
+
+def _is_invalid_generated_query(query: str) -> bool:
+    cleaned = (query or "").strip()
+    if not cleaned:
+        return True
+    words = re.findall(r"[a-zA-Z][a-zA-Z0-9\-]{1,}", cleaned.lower())
+    if len(words) < 3:
+        return True
+    # Reject outputs that still look like raw PDF noise.
+    bad_tokens = {
+        "www", "http", "https", "issn", "volume", "issue", "department",
+        "published", "copyright", "journal", "available"
+    }
+    if sum(1 for w in words if w in bad_tokens) >= 2:
+        return True
+    return False
+
+
+def _clean_generated_query(query: str) -> str:
+    q = (query or "").replace('"', "").replace("'", "").replace("\n", " ").strip().lower()
+    q = re.sub(r"\s+", " ", q).strip()
+    words = q.split()
+    if len(words) > 12:
+        q = " ".join(words[:12])
+    return q
+
+
+def _get_groq_client() -> Optional[Groq]:
+    global _groq_client
+    if _groq_client is not None:
+        return _groq_client
+    api_key = os.getenv("GROQ_API_KEY", "")
+    if not api_key:
+        return None
+    _groq_client = Groq(api_key=api_key)
+    return _groq_client
+
+
+def generate_search_query(text: str) -> str:
+    prompt = f"""
+You are an academic research assistant.
+
+Extract a CLEAN and SHORT academic search query
+from the following research paper text.
+
+RULES:
+- Return ONLY the query.
+- Max 12 words.
+- Remove junk text, URLs, headers, ISSN, journal info.
+- Focus only on the main research topic.
+- Include important AI/ML keywords if present.
+- No explanations.
+
+Paper Text:
+{(text or "")[:3000]}
+"""
+    query = ""
+    try:
+        client = _get_groq_client()
+        if client:
+            response = client.chat.completions.create(
+                model="llama3-8b-8192",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0
+            )
+            query = response.choices[0].message.content.strip()
+    except Exception:
+        logger.exception("[QUERY GEN] Groq generation failed")
+
+    query = _clean_generated_query(query)
+    if _is_invalid_generated_query(query):
+        query = DEFAULT_FALLBACK_QUERY
+
+    print("Generated Search Query:", query)
+    logger.info("[GENERATED SEARCH QUERY] %s", query)
+    return query
 
 
 def clean_research_query(text: str, fallback_text: str = "", min_words: int = 5, max_words: int = 12) -> str:
@@ -502,13 +585,14 @@ def extract_research_topic(document_text: str) -> dict:
     if not keywords:
         keywords = _top_keywords_from_texts([probable_title, abstract, first_para], top_n=6)
 
-    # Core fix: build a short, clean API query (5–12 important words), with fallback to abstract/introduction.
-    semantic_query = clean_research_query(raw_title or probable_title, fallback_text=fallback_blob, min_words=5, max_words=12)
+    llm_input = " ".join([cleaned_text[:3000], abstract[:1000], first_para[:800], raw_title, probable_title]).strip()
+    semantic_query = generate_search_query(llm_input)
     cleaned_query_dbg = semantic_query
-    if not semantic_query:
-        semantic_query = clean_research_query(" ".join(keywords[:8]), fallback_text=fallback_blob, min_words=4, max_words=10)
-    if not semantic_query:
-        semantic_query = "artificial intelligence machine learning trends"
+    if _is_invalid_generated_query(semantic_query):
+        semantic_query = clean_research_query(raw_title or probable_title, fallback_text=fallback_blob, min_words=5, max_words=12)
+    semantic_query = _clean_generated_query(semantic_query)
+    if _is_invalid_generated_query(semantic_query):
+        semantic_query = DEFAULT_FALLBACK_QUERY
 
     logger.info("[CLEANED QUERY] %s", cleaned_query_dbg or semantic_query)
     logger.info("[API SEARCH QUERY] %s", semantic_query)
@@ -582,13 +666,13 @@ def _build_fallback_queries(topic: str) -> list[str]:
 
 
 def _build_multi_strategy_queries(topic_data: dict) -> list[str]:
-    title_q = _compress_query(topic_data.get("title", ""), MAX_QUERY_LENGTH)
     semantic_q = _compress_query(topic_data.get("semantic_query", ""), MAX_QUERY_LENGTH)
-    keywords = topic_data.get("keywords") or []
-    keyword_q = _compress_query(" ".join(keywords[:5]), MAX_QUERY_LENGTH)
-    embedding_like_q = _compress_query(" ".join(_top_keywords_from_texts([topic_data.get("abstract_preview", ""), semantic_q], top_n=6)), MAX_QUERY_LENGTH)
-
-    queries = [title_q, semantic_q, keyword_q, embedding_like_q]
+    if not semantic_q:
+        semantic_q = DEFAULT_FALLBACK_QUERY
+    # Keep all strategies anchored to the cleaned semantic query.
+    shorter = " ".join(semantic_q.split()[:6]).strip()
+    core_terms = " ".join(semantic_q.split()[:4]).strip()
+    queries = [semantic_q, shorter, core_terms]
     ordered = []
     seen = set()
     for q in queries:
@@ -943,7 +1027,7 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
     start_time = time.time()
     metadata = extract_paper_metadata(document_text)
     topic_data = extract_research_topic(document_text)
-    topic = topic_data.get("semantic_query") or "artificial intelligence machine learning"
+    topic = topic_data.get("semantic_query") or DEFAULT_FALLBACK_QUERY
     logger.info("[TOPIC EXTRACTION] title=%s", topic_data.get("title", ""))
     logger.info("[TOPIC EXTRACTION] keywords=%s", topic_data.get("keywords", []))
     logger.info("[SEMANTIC QUERY] %s", topic)
@@ -1067,8 +1151,8 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
             "warning_message": fallback_msg,
             "overall_trends": {"keyword": topic_data.get("semantic_query", topic), "yearly_counts": yearly_counts, "total": total_pubs, "trend": trend_status.lower()},
             "main_trending_keywords": [],
-            "publication_count": 0,
-            "render": False,
+            "publication_count": total_pubs,
+            "render": total_pubs > 0,
             "topic_status": trend_status,
         }
         suggestions = [{
@@ -1144,6 +1228,8 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
         "suggestions":        suggestions,
         "overlap_analysis":   overlap_analysis,
         "warnings":           warnings,
+        "generated_query":    topic,
+        "clean_topic_title":  topic_data.get("title") or topic,
         "extracted_topic":    topic_data.get("semantic_query", topic),
         "topic_extraction":   topic_data,
         "fallback_query_used": used_ss_query or used_oa_query or clean_search_query(topic),

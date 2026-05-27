@@ -76,6 +76,19 @@ For EACH question:
 2. Assign a score (0–10)
 3. Provide detailed explanation (for expandable UI row)
 
+Analyze the research answer.
+
+Return:
+1. strengths
+2. weaknesses
+3. gaps
+4. suggestions
+
+IMPORTANT:
+- gaps must NEVER be empty
+- return at least 2 concise academic gaps
+- focus on missing details, weak evidence, unclear methodology, or missing evaluation
+
 ----------------------------------
 OUTPUT FORMAT (STRICT JSON)
 ----------------------------------
@@ -87,6 +100,7 @@ OUTPUT FORMAT (STRICT JSON)
       "score": <number 0-10>,
       "details": {{
         "analysis": "...",
+        "gaps": ["...", "..."],
         "improvements": ["...", "..."]
       }}
     }}
@@ -379,9 +393,14 @@ def normalize_eval_result(result: Dict[str, Any]) -> Dict[str, Any]:
 
     # ── 3. Final fallback when no gaps could be extracted
     if not gaps:
-        gaps = ["No major gaps identified."]
+        gaps = [
+            "Limited methodological detail",
+            "Insufficient supporting evidence",
+            "Lack of quantitative evaluation",
+        ]
 
     normalized["gaps"] = gaps
+    print("Generated gaps:", gaps)
 
     # ── 4. Normalize suggestions
     suggestions = _ensure_list(result.get("suggestions"))
@@ -423,7 +442,47 @@ def normalize_eval_result(result: Dict[str, Any]) -> Dict[str, Any]:
         analysis_text = " ".join(parts) if parts else "Evaluation completed."
     normalized["analysis"] = analysis_text
 
-    # ── 7. Debug logging for gaps extraction
+    # ── 7. Ensure each evaluation row has non-empty details.gaps and details.improvements
+    evaluations = result.get("evaluations") or []
+    normalized_evaluations: list[Dict[str, Any]] = []
+    if isinstance(evaluations, list):
+        for ev in evaluations:
+            if not isinstance(ev, dict):
+                continue
+            ev_copy = dict(ev)
+            details = ev_copy.get("details")
+            if not isinstance(details, dict):
+                details = {}
+            details_copy: Dict[str, Any] = dict(details)
+
+            details_gaps = _ensure_list(details_copy.get("gaps"))
+            if not details_gaps:
+                details_gaps = list(gaps[:3])
+            details_copy["gaps"] = details_gaps
+
+            details_improvements = _ensure_list(details_copy.get("improvements"))
+            if not details_improvements:
+                details_improvements = list(suggestions[:3]) if suggestions else [
+                    "Clarify methodology and experimental setup.",
+                    "Add stronger evidence with comparative evaluation.",
+                ]
+            details_copy["improvements"] = details_improvements
+
+            if not isinstance(details_copy.get("analysis"), str) or not details_copy.get("analysis", "").strip():
+                details_copy["analysis"] = analysis_text
+
+            ev_copy["details"] = details_copy
+            normalized_evaluations.append(ev_copy)
+    normalized["evaluations"] = normalized_evaluations
+
+    # ── 8. Stable top-level response mapping for API consumers
+    normalized["result"] = {
+        "gaps": list(normalized.get("gaps", [])),
+        "suggestions": list(normalized.get("suggestions", [])),
+        "analysis": normalized.get("analysis", ""),
+    }
+
+    # ── 9. Debug logging for gaps extraction
     try:
         logger.info(
             "[EVAL NORMALIZED] %s",

@@ -15,7 +15,7 @@ from services.academic_intelligence import (
     compute_enhanced_quality,
     compute_novelty_score,
     get_domain_aware_trends_async,
-    clean_research_query,
+    generate_search_query,
 )
 from services.semantic_scholar import (
     get_similar_papers,
@@ -84,9 +84,8 @@ async def similar_papers_endpoint(request: AnalysisRequest):
     try:
         text = await _get_document_text_async(request.filename)
         topic_data = extract_research_topic(text)
-        raw = request.query or topic_data.get("semantic_query") or topic_data.get("title", "")
-        # Stabilize query string before calling external academic APIs.
-        title = clean_research_query(raw, fallback_text=(topic_data.get("abstract_preview") or text[:1000]), min_words=5, max_words=12) or raw
+        raw = request.query or topic_data.get("semantic_query") or topic_data.get("title", "") or text[:3000]
+        title = generate_search_query(raw)
         metadata = extract_paper_metadata(text)
 
         # Parallel fetch using semantic query for precision
@@ -108,7 +107,7 @@ async def quality_index_endpoint(request: AnalysisRequest):
     try:
         text = await _get_document_text_async(request.filename)
         topic_data = extract_research_topic(text)
-        title = request.query or topic_data.get("semantic_query") or topic_data.get("title", "")
+        title = generate_search_query(request.query or topic_data.get("semantic_query") or topic_data.get("title", "") or text[:3000])
         metadata = extract_paper_metadata(text)
         
         ss_papers = await get_similar_papers(title, metadata.get("abstract", ""), limit=5)
@@ -127,7 +126,7 @@ async def trends_endpoint(request: AnalysisRequest):
     try:
         text = await _get_document_text_async(request.filename)
         topic_data = extract_research_topic(text)
-        keyword = request.query or topic_data.get("semantic_query", "")
+        keyword = generate_search_query(request.query or topic_data.get("semantic_query", "") or text[:3000])
         
         trends_task = get_domain_aware_trends_async(keyword)
         concepts_task = get_related_concepts(keyword, limit=8)
@@ -172,6 +171,21 @@ async def evaluate_questions_endpoint(request: PerQuestionEvaluationRequest):
         result = await evaluate_per_question_async(
             llm, request.questions, text, request.context
         )
+        evaluations = result.get("evaluations", []) if isinstance(result, dict) else []
+        if isinstance(evaluations, list):
+            for ev in evaluations:
+                if not isinstance(ev, dict):
+                    continue
+                details = ev.get("details")
+                if not isinstance(details, dict):
+                    details = {}
+                    ev["details"] = details
+                gaps = details.get("gaps", [])
+                if isinstance(gaps, str):
+                    gaps = [gaps] if gaps.strip() else []
+                elif not isinstance(gaps, list):
+                    gaps = []
+                details["gaps"] = gaps
         return {"status": "success", "results": result}
     except HTTPException:
         raise
