@@ -331,7 +331,7 @@ async def health():
 # -------------------------------------------------------------------
 # Indexing routine for lazy processing of uploaded documents
 # -------------------------------------------------------------------
-async def index_file(file_id: str, file_path: str):
+async def index_file(file_id: str, filename: str, file_path: str):
     """Create Chroma index for the given file_path and update status.
 
     This runs in a background task triggered by the first query on an
@@ -340,28 +340,42 @@ async def index_file(file_id: str, file_path: str):
     embedding model loader from services.resource_manager.
     """
     try:
+        logger.info("INDEX START file_id=%s filename=%s path=%s", file_id, filename, file_path)
+        file_status.set_status(file_id, {
+            "uploaded": True,
+            "processing": True,
+            "indexed": False,
+            "error": None,
+            "filename": filename,
+        })
+
         # Create or load the vector DB – heavy work off the event loop
+        logger.info("Calling create_or_load_db for file_id=%s", file_id)
         await asyncio.to_thread(create_or_load_db, file_path)
+        logger.info("create_or_load_db finished for file_id=%s", file_id)
+
         # Update status to reflect successful indexing
         file_status.set_status(file_id, {
             "uploaded": True,
             "processing": False,
             "indexed": True,
             "error": None,
-            "filename": os.path.basename(file_path),
+            "filename": filename,
         })
         # Update indexed status in persistent registry
         if file_id in FILE_REGISTRY:
             FILE_REGISTRY[file_id]["indexed"] = True
             save_file_registry(FILE_REGISTRY)
-        logger.info("Indexing completed for %s", file_path)
+        logger.info("INDEX COMPLETE file_id=%s filename=%s", file_id, filename)
     except Exception as e:
-        logger.exception("Indexing failed for %s", file_path)
+        logger.exception("Indexing failed for file_id=%s filename=%s path=%s", file_id, filename, file_path)
         # Record failure without overwriting uploaded flag
         file_status.set_status(file_id, {
+            "uploaded": True,
             "processing": False,
             "indexed": False,
             "error": str(e),
+            "filename": filename,
         })
 
 
@@ -407,7 +421,7 @@ async def ask(request: QuestionRequest):
                 # Trigger background indexing if not already started
                 if not status.get("processing"):
                     file_status.set_status(request.file_id, {"processing": True})
-                    asyncio.create_task(index_file(request.file_id, file_path))
+                    asyncio.create_task(index_file(request.file_id, filename, file_path))
                 raise HTTPException(status_code=503, detail="Document is being processed")
             
             # Load context using the resolved path and filename
@@ -720,11 +734,14 @@ async def upload_file(file: UploadFile = File(...)):
 
         file_status.set_status(file_id, {
             "uploaded": True,
-            "processing": False,
+            "processing": True,
             "indexed": False,
             "error": None,
             "filename": file.filename,
         })
+
+        # Start indexing immediately after upload (non-blocking background task)
+        asyncio.create_task(index_file(file_id, file.filename, file_path))
 
         # Optional eager preload (kept for backward compatibility)
         if os.getenv("PRELOAD_ON_UPLOAD", "false").lower() in ("1", "true", "yes"):
