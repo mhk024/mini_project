@@ -23,7 +23,7 @@ EMBEDDING_MODEL = os.getenv(
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     logger.error("GROQ_API_KEY environment variable not set. LLM will not be available.")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama3-8b-8192")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.2"))
 GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "1024"))
 CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "chroma_db")
