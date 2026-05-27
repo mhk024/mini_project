@@ -58,7 +58,7 @@ async def _load_context_async(filename: str):
         state.qa_chain = ctx["qa"]
         return
 
-    file_path = os.path.join("dataset", filename)
+    file_path = os.path.join(DATASET_DIR, filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -109,10 +109,11 @@ class QuestionRequest(BaseModel):
     question: str
     filename: str | None = None
     mode: str = "student"
+    session_id: str | None = None
 
 
 class AnalyzePaperRequest(BaseModel):
-    filename: str
+    filename: str | None = None
     reference_text: str = ""
 
 
@@ -124,6 +125,93 @@ class EvaluateRequest(BaseModel):
 
 class SetFileRequest(BaseModel):
     filename: str
+
+
+import json
+import uuid
+
+USERS_FILE = "users.json"
+HISTORY_FILE = "history.json"
+APP_STATE_FILE = "app_state.json"
+
+def load_json_file(file_path: str, default: dict) -> dict:
+    if not os.path.exists(file_path):
+        return default
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+def save_json_file(file_path: str, data: dict):
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving to {file_path}: {e}")
+
+async def _get_active_document_text() -> str:
+    # 1. Try to read active document text from loaded vector db context
+    if state.vector_db is not None:
+        from research_analyzer import get_document_text
+        text = await asyncio.to_thread(get_document_text, state.vector_db)
+        if text:
+            return text
+            
+    # 2. Try to fall back to the most recently loaded context
+    if state.loaded_contexts:
+        last_filename = list(state.loaded_contexts.keys())[-1]
+        ctx = state.loaded_contexts[last_filename]
+        from research_analyzer import get_document_text
+        text = await asyncio.to_thread(get_document_text, ctx["db"])
+        if text:
+            return text
+            
+    # 3. Try to fall back to the most recently uploaded file in DATASET_DIR
+    if os.path.exists(DATASET_DIR):
+        files = [
+            f for f in os.listdir(DATASET_DIR)
+            if os.path.isfile(os.path.join(DATASET_DIR, f)) and f.endswith((".pdf", ".txt"))
+        ]
+        if files:
+            files.sort(key=lambda x: os.path.getmtime(os.path.join(DATASET_DIR, x)), reverse=True)
+            last_file = files[0]
+            await _load_context_async(last_file)
+            from research_analyzer import get_document_text
+            text = await asyncio.to_thread(get_document_text, state.vector_db)
+            if text:
+                return text
+                
+    raise HTTPException(status_code=400, detail="No active document found. Please upload/load a document first.")
+
+# Global dictionary to track evaluation job statuses
+eval_jobs = {}
+
+async def run_evaluation_task(job_id: str, request: EvaluateRequest):
+    try:
+        await _load_context_async(request.filename)
+        from evaluator import run_full_evaluation
+        
+        def progress_callback(step_name, current_progress, total, result=None):
+            eval_jobs[job_id]["step"] = step_name
+            eval_jobs[job_id]["progress"] = current_progress
+            eval_jobs[job_id]["total"] = total
+            if result:
+                eval_jobs[job_id]["result"] = result
+                eval_jobs[job_id]["status"] = "completed"
+
+        await run_full_evaluation(
+            llm=get_llm(),
+            rag_chain=state.qa_chain,
+            db=state.vector_db,
+            uploaded_files=[request.filename],
+            progress_cb=progress_callback,
+            mode=request.mode
+        )
+    except Exception as e:
+        logger.error("Background evaluation failed: %s", e)
+        eval_jobs[job_id]["status"] = "error"
+        eval_jobs[job_id]["error"] = str(e)
 
 
 @app.get("/health")
@@ -151,13 +239,68 @@ async def ask(request: QuestionRequest):
             raise HTTPException(status_code=503, detail="Context not loaded")
         ckey = f"ask:{request.filename}:{request.question}:{request.mode}"
         cached = await cache_manager.get(ckey, category="rag_chat")
+        
         if cached:
             cached["cache_hit"] = True
-            return cached
-        result = await state.qa_chain(request.question, mode=request.mode)
-        result["execution_time_ms"] = round((time.time() - start_time) * 1000, 2)
-        result["cache_hit"] = False
-        await cache_manager.set(ckey, result, category="rag_chat")
+            result = cached
+        else:
+            result = await state.qa_chain(request.question, mode=request.mode)
+            result["execution_time_ms"] = round((time.time() - start_time) * 1000, 2)
+            result["cache_hit"] = False
+            await cache_manager.set(ckey, result, category="rag_chat")
+            
+        # Update metrics in app_state.json
+        if request.username:
+            app_state = load_json_file(APP_STATE_FILE, {"users": {}})
+            users_state = app_state.get("users", {})
+            if request.username in users_state:
+                mode_key = "Student" if request.mode == "student" else "Research"
+                mode_state = users_state[request.username].get(mode_key, {})
+                metrics = mode_state.get("metrics", {})
+                
+                total = metrics.get("total_queries", 0) + 1
+                total_time = metrics.get("total_response_time_ms", 0.0) + result.get("execution_time_ms", 0.0)
+                hits = metrics.get("cache_hits", 0) + (1 if result.get("cache_hit") else 0)
+                misses = metrics.get("cache_misses", 0) + (0 if result.get("cache_hit") else 1)
+                
+                metrics["total_queries"] = total
+                metrics["total_response_time_ms"] = total_time
+                metrics["avg_response_time_ms"] = round(total_time / total, 2)
+                metrics["cache_hits"] = hits
+                metrics["cache_misses"] = misses
+                metrics["cache_hit_rate"] = round(hits / total, 4)
+                
+                mode_state["metrics"] = metrics
+                users_state[request.username][mode_key] = mode_state
+                app_state["users"] = users_state
+                save_json_file(APP_STATE_FILE, app_state)
+                
+        # Save to history.json
+        if request.username and request.session_id:
+            history = load_json_file(HISTORY_FILE, {})
+            if request.username not in history:
+                history[request.username] = {}
+                
+            session_id = request.session_id
+            if session_id not in history[request.username]:
+                title = (request.question[:30] + "…") if len(request.question) > 30 else request.question
+                history[request.username][session_id] = {
+                    "title": title,
+                    "messages": []
+                }
+                
+            history[request.username][session_id]["messages"].append({
+                "role": "user",
+                "content": request.question,
+                "filename": request.filename
+            })
+            history[request.username][session_id]["messages"].append({
+                "role": "assistant",
+                "content": result.get("answer", ""),
+                "filename": request.filename
+            })
+            save_json_file(HISTORY_FILE, history)
+            
         logger.info("Result /ask: %s", result)
         return result
     except HTTPException:
@@ -170,29 +313,47 @@ async def ask(request: QuestionRequest):
 @app.post("/evaluate")
 async def evaluate_endpoint(request: EvaluateRequest):
     logger.info("Entry /evaluate: %s", request)
-    try:
-        await _load_context_async(request.filename)
-        from evaluator import run_full_evaluation
+    job_id = str(uuid.uuid4())
+    eval_jobs[job_id] = {
+        "status": "running",
+        "step": "Initializing",
+        "progress": 0,
+        "total": 3 if request.mode == "quick" else 10,
+        "result": None,
+        "error": None
+    }
+    
+    asyncio.create_task(run_evaluation_task(job_id, request))
+    return {"job_id": job_id}
 
-        result = await run_full_evaluation(
-            llm=get_llm(),
-            rag_chain=state.qa_chain,
-            db=state.vector_db,
-            uploaded_files=[request.filename],
-            mode=request.mode,
-        )
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Evaluation error: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+
+@app.get("/status/{job_id}")
+async def get_status(job_id: str):
+    if job_id not in eval_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return eval_jobs[job_id]
 
 
 @app.post("/analyze/paper")
 async def analyze_paper_endpoint(request: AnalyzePaperRequest):
     try:
-        await _load_context_async(request.filename)
+        filename = request.filename
+        if not filename:
+            if state.loaded_contexts:
+                filename = list(state.loaded_contexts.keys())[-1]
+            elif os.path.exists(DATASET_DIR):
+                files = [
+                    f for f in os.listdir(DATASET_DIR)
+                    if os.path.isfile(os.path.join(DATASET_DIR, f)) and f.endswith((".pdf", ".txt"))
+                ]
+                if files:
+                    files.sort(key=lambda x: os.path.getmtime(os.path.join(DATASET_DIR, x)), reverse=True)
+                    filename = files[0]
+                    
+        if not filename:
+            raise HTTPException(status_code=400, detail="No active document found. Please load or upload a document first.")
+            
+        await _load_context_async(filename)
         from research_analyzer import run_full_pipeline, get_document_text
 
         text = await asyncio.to_thread(get_document_text, state.vector_db)
@@ -208,6 +369,88 @@ async def analyze_paper_endpoint(request: AnalyzePaperRequest):
     except Exception as e:
         logger.error("Analysis error: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/analyze/quality")
+async def analyze_quality():
+    try:
+        text = await _get_active_document_text()
+        from research_analyzer import analyze_paper_async
+        result = await analyze_paper_async(get_llm(), text)
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+        return {"scores": result.get("scores", {})}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/analyze/plagiarism")
+async def analyze_plagiarism():
+    try:
+        text = await _get_active_document_text()
+        from research_analyzer import analyze_paper_async
+        result = await analyze_paper_async(get_llm(), text)
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+            
+        novelty = result.get("scores", {}).get("novelty", 7.0)
+        return {
+            "plagiarism": {
+                "plagiarism_risk": "Low" if novelty >= 7.0 else "Medium" if novelty >= 4.0 else "High",
+                "novelty_score": f"{novelty * 10:.0f}%",
+                "overlap_analysis": result.get("plagiarism", ""),
+                "similar_papers_summary": result.get("similar_papers", []),
+                "missing_references": result.get("weaknesses", []),
+                "improvements": result.get("suggestions", [])
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/analyze/trends")
+async def analyze_trends():
+    try:
+        text = await _get_active_document_text()
+        from services.academic_intelligence import run_full_academic_analysis_async
+        try:
+            acad_res = await run_full_academic_analysis_async(text)
+            trends_summary = acad_res.get("trends", {}).get("warning_message", "") or "Highly aligned with modern research."
+        except Exception:
+            trends_summary = "Stable"
+            
+        prompt = f"Analyze this research paper excerpt and provide a high-quality trend analysis paragraph (3-4 sentences) outlining its relevance to recent breakthroughs (2024-2026), modern methodologies, and industry standards: {text[:2000]}"
+        try:
+            llm = get_llm()
+            raw_res = await llm.ainvoke(prompt)
+            analysis_text = raw_res.content if hasattr(raw_res, "content") else str(raw_res)
+        except Exception as e:
+            analysis_text = f"The paper's theme aligns with contemporary advancements. Trend: {trends_summary}."
+            
+        return {"trend_analysis": analysis_text}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/analyze/suggestions")
+async def analyze_suggestions():
+    try:
+        text = await _get_active_document_text()
+        from research_analyzer import analyze_paper_async
+        result = await analyze_paper_async(get_llm(), text)
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+        return {"suggestions": result.get("suggestions", [])}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/set_file")
@@ -254,12 +497,299 @@ async def list_files():
 
 @app.get("/history/{username}")
 async def get_history(username: str):
-    return {"history": []}
+    history = load_json_file(HISTORY_FILE, {})
+    return {"history": history.get(username, {})}
+
+
+@app.delete("/history/{username}/{session_id}")
+async def delete_history(username: str, session_id: str):
+    history = load_json_file(HISTORY_FILE, {})
+    if username in history and session_id in history[username]:
+        del history[username][session_id]
+        save_json_file(HISTORY_FILE, history)
+        return {"status": "success"}
+    raise HTTPException(status_code=404, detail="Session not found")
 
 
 @app.post("/login")
 async def login(creds: dict):
-    return {"status": "success", "username": creds.get("username")}
+    username = creds.get("username")
+    password = creds.get("password")
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Username and password are required")
+    
+    users = load_json_file(USERS_FILE, {})
+    if username not in users or users[username].get("password") != password:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    return {"status": "success", "username": username}
+
+
+@app.post("/signup")
+async def signup(creds: dict):
+    username = creds.get("username")
+    password = creds.get("password")
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Username and password are required")
+    
+    users = load_json_file(USERS_FILE, {})
+    if username in users:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    
+    users[username] = {"password": password}
+    save_json_file(USERS_FILE, users)
+    return {"status": "success", "username": username}
+
+
+@app.get("/state/{username}")
+async def get_state(username: str):
+    app_state = load_json_file(APP_STATE_FILE, {"users": {}})
+    users_state = app_state.get("users", {})
+    
+    # Initialize default state for user if not exists
+    if username not in users_state:
+        users_state[username] = {
+            "Student": {
+                "chat": [],
+                "last_pipeline": {},
+                "last_input": "",
+                "metrics": {
+                    "total_queries": 0,
+                    "total_response_time_ms": 0.0,
+                    "avg_response_time_ms": 0.0,
+                    "cache_hits": 0,
+                    "cache_misses": 0,
+                    "cache_hit_rate": 0.0
+                }
+            },
+            "Research": {
+                "chat": [],
+                "last_pipeline": {},
+                "last_input": "",
+                "res_quality": None,
+                "res_plagiarism": None,
+                "res_trends": None,
+                "res_suggestions": None,
+                "insights": {
+                    "quality": None,
+                    "plagiarism": None,
+                    "trends": None,
+                    "suggestions": None
+                },
+                "metrics": {
+                    "total_queries": 0,
+                    "total_response_time_ms": 0.0,
+                    "avg_response_time_ms": 0.0,
+                    "cache_hits": 0,
+                    "cache_misses": 0,
+                    "cache_hit_rate": 0.0
+                }
+            },
+            "Evaluate": {
+                "eval_result": None,
+                "eval_job_id": None,
+                "last_input": "",
+                "runs": []
+            }
+        }
+        app_state["users"] = users_state
+        save_json_file(APP_STATE_FILE, app_state)
+        
+    return {"state": users_state[username]}
+
+
+@app.post("/state/{username}")
+async def save_state(username: str, payload: dict):
+    mode = payload.get("mode")  # e.g., "student", "researcher", "eval"
+    data = payload.get("data", {})
+    
+    app_state = load_json_file(APP_STATE_FILE, {"users": {}})
+    users_state = app_state.get("users", {})
+    
+    if username not in users_state:
+        users_state[username] = {}
+        
+    mode_map = {
+        "student": "Student",
+        "researcher": "Research",
+        "eval": "Evaluate",
+        "eval_engine": "EvalEngine"
+    }
+    
+    back_mode = mode_map.get(mode)
+    if not back_mode:
+        raise HTTPException(status_code=400, detail=f"Invalid mode: {mode}")
+        
+    current_mode_state = users_state[username].get(back_mode, {})
+    
+    if back_mode == "Student":
+        current_mode_state["last_input"] = data.get("last_input", "")
+        current_mode_state["last_pipeline"] = data.get("pipeline_data", {})
+        
+        messages = data.get("messages", [])
+        chat_list = []
+        for i in range(0, len(messages), 2):
+            if i + 1 < len(messages):
+                chat_list.append({
+                    "query": messages[i].get("content", ""),
+                    "response": messages[i+1].get("content", "")
+                })
+        current_mode_state["chat"] = chat_list
+        
+    elif back_mode == "Research":
+        current_mode_state["last_input"] = data.get("last_input", "")
+        current_mode_state["last_pipeline"] = data.get("pipeline_data", {})
+        
+        current_mode_state["res_quality"] = data.get("res_quality")
+        current_mode_state["res_plagiarism"] = data.get("res_plagiarism")
+        current_mode_state["res_trends"] = data.get("res_trends")
+        current_mode_state["res_suggestions"] = data.get("res_suggestions")
+        current_mode_state["insights"] = {
+            "quality": data.get("res_quality"),
+            "plagiarism": data.get("res_plagiarism"),
+            "trends": data.get("res_trends"),
+            "suggestions": data.get("res_suggestions")
+        }
+        
+        messages = data.get("messages", [])
+        chat_list = []
+        for i in range(0, len(messages), 2):
+            if i + 1 < len(messages):
+                chat_list.append({
+                    "query": messages[i].get("content", ""),
+                    "response": messages[i+1].get("content", "")
+                })
+        current_mode_state["chat"] = chat_list
+        
+    elif back_mode == "Evaluate":
+        current_mode_state["eval_result"] = data.get("eval_result")
+        current_mode_state["eval_job_id"] = data.get("eval_job_id")
+        current_mode_state["last_input"] = data.get("last_input", "")
+        current_mode_state["runs"] = data.get("runs", [])
+        
+    users_state[username][back_mode] = current_mode_state
+    app_state["users"] = users_state
+    save_json_file(APP_STATE_FILE, app_state)
+    return {"status": "success"}
+
+
+@app.post("/state/{username}/switch")
+async def switch_mode(username: str, payload: dict):
+    mode = payload.get("mode")
+    app_state = load_json_file(APP_STATE_FILE, {"users": {}})
+    users_state = app_state.get("users", {})
+    if username in users_state:
+        users_state[username]["current_mode"] = mode
+        app_state["users"] = users_state
+        save_json_file(APP_STATE_FILE, app_state)
+    return {"status": "success"}
+
+
+@app.post("/state/{username}/clear_mode/{mode}")
+async def clear_mode(username: str, mode: str):
+    app_state = load_json_file(APP_STATE_FILE, {"users": {}})
+    users_state = app_state.get("users", {})
+    
+    mode_map = {
+        "student": "Student",
+        "researcher": "Research",
+        "eval": "Evaluate",
+        "eval_engine": "EvalEngine"
+    }
+    
+    back_mode = mode_map.get(mode)
+    if username in users_state and back_mode in users_state[username]:
+        if back_mode == "Student":
+            users_state[username]["Student"] = {
+                "chat": [],
+                "last_pipeline": {},
+                "last_input": "",
+                "metrics": users_state[username]["Student"].get("metrics", {})
+            }
+        elif back_mode == "Research":
+            users_state[username]["Research"] = {
+                "chat": [],
+                "last_pipeline": {},
+                "last_input": "",
+                "res_quality": None,
+                "res_plagiarism": None,
+                "res_trends": None,
+                "res_suggestions": None,
+                "insights": {
+                    "quality": None,
+                    "plagiarism": None,
+                    "trends": None,
+                    "suggestions": None
+                },
+                "metrics": users_state[username]["Research"].get("metrics", {})
+            }
+        elif back_mode == "Evaluate":
+            users_state[username]["Evaluate"] = {
+                "eval_result": None,
+                "eval_job_id": None,
+                "last_input": "",
+                "runs": []
+            }
+        app_state["users"] = users_state
+        save_json_file(APP_STATE_FILE, app_state)
+        
+    return {"status": "success"}
+
+
+@app.post("/state/{username}/clear_all")
+async def clear_all(username: str):
+    app_state = load_json_file(APP_STATE_FILE, {"users": {}})
+    users_state = app_state.get("users", {})
+    
+    if username in users_state:
+        users_state[username]["Student"] = {
+            "chat": [],
+            "last_pipeline": {},
+            "last_input": "",
+            "metrics": users_state[username]["Student"].get("metrics", {})
+        }
+        users_state[username]["Research"] = {
+            "chat": [],
+            "last_pipeline": {},
+            "last_input": "",
+            "res_quality": None,
+            "res_plagiarism": None,
+            "res_trends": None,
+            "res_suggestions": None,
+            "insights": {
+                "quality": None,
+                "plagiarism": None,
+                "trends": None,
+                "suggestions": None
+            },
+            "metrics": users_state[username]["Research"].get("metrics", {})
+        }
+        users_state[username]["Evaluate"] = {
+            "eval_result": None,
+            "eval_job_id": None,
+            "last_input": "",
+            "runs": []
+        }
+        app_state["users"] = users_state
+        save_json_file(APP_STATE_FILE, app_state)
+        
+    return {"status": "success"}
+
+
+@app.get("/dashboard/{username}")
+async def get_dashboard(username: str):
+    app_state = load_json_file(APP_STATE_FILE, {"users": {}})
+    user_data = app_state.get("users", {}).get(username, {})
+    
+    dash_dict = {}
+    for key in ["Student", "Research", "Evaluate", "EvalEngine"]:
+        metrics = user_data.get(key, {}).get("metrics", {})
+        dash_dict[key] = {
+            "total_queries": metrics.get("total_queries", 0),
+            "avg_response_time_ms": metrics.get("avg_response_time_ms", 0.0),
+            "cache_hit_rate": metrics.get("cache_hit_rate", 0.0)
+        }
+    return dash_dict
 
 
 def __getattr__(name: str):

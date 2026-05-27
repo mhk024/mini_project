@@ -27,7 +27,7 @@ import os
 # 🔗  API URLs
 # ─────────────────────────────────────────────────────────────
 
-BASE = os.getenv("API_URL", "").rstrip('/')
+BASE = os.getenv("API_URL", "http://localhost:8000").rstrip('/')
 API_URL       = f"{BASE}/ask"
 UPLOAD_URL    = f"{BASE}/upload"
 LOGIN_URL     = f"{BASE}/login"
@@ -484,86 +484,6 @@ def _load_full_state_from_backend():
     except Exception:
         pass
 
-def _snapshot_mode_local(mode: str):
-    if mode == "student":
-        st.session_state.mode_store["student"] = {
-            "messages": st.session_state.messages,
-            "pipeline_data": st.session_state.pipeline_data,
-            "last_input": st.session_state.mode_store["student"].get("last_input", ""),
-        }
-    elif mode == "researcher":
-        st.session_state.mode_store["researcher"] = {
-            "messages": st.session_state.messages,
-            "pipeline_data": st.session_state.pipeline_data,
-            "last_input": st.session_state.mode_store["researcher"].get("last_input", ""),
-            "res_quality": st.session_state.res_quality,
-            "res_plagiarism": st.session_state.res_plagiarism,
-            "res_trends": st.session_state.res_trends,
-            "res_suggestions": st.session_state.res_suggestions,
-        }
-    else:
-        st.session_state.mode_store["eval"] = {
-            "eval_result": st.session_state.eval_result,
-            "eval_job_id": st.session_state.eval_job_id,
-            "last_input": st.session_state.mode_store["eval"].get("last_input", ""),
-            "runs": st.session_state.mode_store["eval"].get("runs", []),
-        }
-
-def _restore_mode_local(mode: str):
-    data = st.session_state.mode_store.get(mode, {})
-    if mode == "student":
-        st.session_state.messages = data.get("messages", [])
-        st.session_state.pipeline_data = data.get("pipeline_data", {})
-    elif mode == "researcher":
-        st.session_state.messages = data.get("messages", [])
-        st.session_state.pipeline_data = data.get("pipeline_data", {})
-        st.session_state.res_quality = data.get("res_quality")
-        st.session_state.res_plagiarism = data.get("res_plagiarism")
-        st.session_state.res_trends = data.get("res_trends")
-        st.session_state.res_suggestions = data.get("res_suggestions")
-    else:
-        st.session_state.eval_result = data.get("eval_result")
-        st.session_state.eval_job_id = data.get("eval_job_id")
-
-def _sync_mode_to_backend(mode: str):
-    if not st.session_state.username:
-        return
-    data = st.session_state.mode_store.get(mode, {})
-    try:
-        requests.post(f"{STATE_URL}/{st.session_state.username}", json={"mode": mode, "data": data}, timeout=120)
-    except Exception:
-        pass
-
-def _load_full_state_from_backend():
-    if not st.session_state.username:
-        return
-    try:
-        r = requests.get(f"{STATE_URL}/{st.session_state.username}", timeout=120)
-        if r.status_code != 200:
-            return
-        payload = r.json().get("state", {})
-        st.session_state.mode_store["student"] = {
-            "messages": payload.get("Student", {}).get("chat", []),
-            "pipeline_data": payload.get("Student", {}).get("last_pipeline", {}),
-            "last_input": payload.get("Student", {}).get("last_input", ""),
-        }
-        st.session_state.mode_store["researcher"] = {
-            "messages": payload.get("Research", {}).get("chat", []),
-            "pipeline_data": payload.get("Research", {}).get("last_pipeline", {}),
-            "last_input": payload.get("Research", {}).get("last_input", ""),
-            "res_quality": payload.get("Research", {}).get("insights", {}).get("quality"),
-            "res_plagiarism": payload.get("Research", {}).get("insights", {}).get("plagiarism"),
-            "res_trends": payload.get("Research", {}).get("insights", {}).get("trends"),
-            "res_suggestions": payload.get("Research", {}).get("insights", {}).get("suggestions"),
-        }
-        st.session_state.mode_store["eval"] = {
-            "eval_result": payload.get("Evaluate", {}).get("last_results"),
-            "eval_job_id": None,
-            "last_input": payload.get("Evaluate", {}).get("last_input", ""),
-            "runs": payload.get("Evaluate", {}).get("runs", []),
-        }
-    except Exception:
-        pass
 
 
 def _delete_chat_session(session_id: str):
@@ -1089,7 +1009,11 @@ if st.session_state.mode == "student":
                         st.caption(f"Response time: {data.get('execution_time_ms', 0)} ms | Cache: {cache_txt}")
                     else:
                         status.update(label="❌ Backend Error", state="error")
-                        st.error(f"Backend error: {r.status_code}")
+                        try:
+                            detail = r.json().get("detail", r.text)
+                        except Exception:
+                            detail = r.text
+                        st.error(f"Backend error ({r.status_code}): {detail}")
 
             except Exception as e:
                 st.error(f"⚠️ Network error: {e}")
@@ -1322,7 +1246,10 @@ elif st.session_state.mode == "researcher":
                 st.write("📄 Processing multiple modules...")
                 r = requests.post(
                     ANA_PAPER,
-                    json={"reference_text": ref_text or ""},
+                    json={
+                        "filename": st.session_state.loaded_file,
+                        "reference_text": ref_text or ""
+                    },
                     timeout=180,
                 )
                 if r.status_code == 200:
@@ -1784,7 +1711,11 @@ elif st.session_state.mode == "researcher":
                     cache_txt = "Hit" if data.get("cache_hit") else "Miss"
                     st.caption(f"Response time: {data.get('execution_time_ms', 0)} ms | Cache: {cache_txt}")
                 else:
-                    st.error(f"❌ Backend error {r.status_code}")
+                    try:
+                        detail = r.json().get("detail", r.text)
+                    except Exception:
+                        detail = r.text
+                    st.error(f"❌ Backend error ({r.status_code}): {detail}")
             except Exception as e:
                 st.error(f"⚠️ Network error: {e}")
 

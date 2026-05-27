@@ -26,6 +26,8 @@ from services.openalex import (
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Academic Intelligence"])
 
+DATASET_DIR = os.getenv("DATASET_DIR", os.path.join(os.getenv("TMPDIR", "/tmp"), "dataset"))
+
 # ─────────────────────────────────────────────
 # 📦  REQUEST MODELS
 # ─────────────────────────────────────────────
@@ -56,7 +58,7 @@ async def _get_document_text_async(filename: Optional[str] = None) -> str:
     if not filename:
         raise HTTPException(400, "No document loaded.")
 
-    file_path = os.path.join("dataset", filename)
+    file_path = os.path.join(DATASET_DIR, filename)
     if not os.path.exists(file_path):
         raise HTTPException(404, f"File {filename} not found.")
 
@@ -159,4 +161,36 @@ async def evaluate_questions_endpoint(request: PerQuestionEvaluationRequest):
         raise
     except Exception as e:
         logger.error(f"Evaluation error: {e}")
+        raise HTTPException(500, str(e))
+
+@router.post("/suggestions")
+async def suggestions_endpoint(request: AnalysisRequest):
+    try:
+        text = await _get_document_text_async(request.filename)
+        res = await run_full_academic_analysis_async(text)
+        return {
+            "status": "success",
+            "suggestions": res.get("suggestions", []),
+            "missing_citations": res.get("missing_citations", [])
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Suggestions error: {e}")
+        raise HTTPException(500, str(e))
+
+@router.post("/novelty-check")
+async def novelty_check_endpoint(request: AnalysisRequest):
+    try:
+        text = await _get_document_text_async(request.filename)
+        res = await run_full_academic_analysis_async(text)
+        return {
+            "status": "success",
+            "novelty_score": res.get("novelty_score"),
+            "interpretation": res.get("quality_index", {}).get("interpretation", "")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Novelty error: {e}")
         raise HTTPException(500, str(e))
