@@ -108,3 +108,7 @@ def release_heavy_models(keep_embeddings: bool = True) -> None:
         if not keep_embeddings:
             _embeddings = None
     logger.info("Released heavy models (keep_embeddings=%s)", keep_embeddings)
+
+# For backward compatibility / RAG pipeline integration
+get_embedding_model = get_embeddings
+

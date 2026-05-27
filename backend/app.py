@@ -8,6 +8,8 @@ import os
 import sys
 import time
 import gc
+import logging
+import asyncio
 
 # import psutil  # Removed to eliminate external dependency
 from fastapi.responses import JSONResponse
@@ -28,7 +30,7 @@ from services.cache_manager import cache_manager
 from services.resource_manager import get_llm, release_heavy_models
 from routes.academic import router as academic_router
 from rag_pipeline import create_or_load_db
-from . import state
+import state
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -260,6 +262,39 @@ async def health():
         },
     }
 
+# -------------------------------------------------------------------
+# Indexing routine for lazy processing of uploaded documents
+# -------------------------------------------------------------------
+async def index_file(file_id: str, file_path: str):
+    """Create Chroma index for the given file_path and update status.
+
+    This runs in a background task triggered by the first query on an
+    uploaded document. It respects the MAX_CHUNKS, CHUNK_SIZE and
+    CHUNK_OVERLAP settings defined in config.py and uses the lazy
+    embedding model loader from services.resource_manager.
+    """
+    try:
+        # Create or load the vector DB – heavy work off the event loop
+        await asyncio.to_thread(create_or_load_db, file_path)
+        # Update status to reflect successful indexing
+        file_status.set_status(file_id, {
+            "uploaded": True,
+            "processing": False,
+            "indexed": True,
+            "error": None,
+            "filename": os.path.basename(file_path),
+        })
+        logger.info("Indexing completed for %s", file_path)
+    except Exception as e:
+        logger.exception("Indexing failed for %s", file_path)
+        # Record failure without overwriting uploaded flag
+        file_status.set_status(file_id, {
+            "processing": False,
+            "indexed": False,
+            "error": str(e),
+        })
+
+
 @app.get("/files/status/{file_id}")
 async def get_file_status(file_id: str):
     return file_status.get_status(file_id)
@@ -294,38 +329,6 @@ async def ask(request: QuestionRequest):
         else:
             # Fallback to legacy filename handling
             await _load_context_async(request.filename)
-
-# -------------------------------------------------------------------
-# Indexing routine for lazy processing of uploaded documents
-# -------------------------------------------------------------------
-async def index_file(file_id: str, file_path: str):
-    """Create Chroma index for the given file_path and update status.
-
-    This runs in a background task triggered by the first query on an
-    uploaded document. It respects the MAX_CHUNKS, CHUNK_SIZE and
-    CHUNK_OVERLAP settings defined in config.py and uses the lazy
-    embedding model loader from services.resource_manager.
-    """
-    try:
-        # Create or load the vector DB – heavy work off the event loop
-        await asyncio.to_thread(create_or_load_db, file_path)
-        # Update status to reflect successful indexing
-        file_status.set_status(file_id, {
-            "uploaded": True,
-            "processing": False,
-            "indexed": True,
-            "error": None,
-            "filename": os.path.basename(file_path),
-        })
-        logger.info("Indexing completed for %s", file_path)
-    except Exception as e:
-        logger.exception("Indexing failed for %s", file_path)
-        # Record failure without overwriting uploaded flag
-        file_status.set_status(file_id, {
-            "processing": False,
-            "indexed": False,
-            "error": str(e),
-        })
 
         if not state.qa_chain:
             raise HTTPException(status_code=503, detail="Context not loaded")

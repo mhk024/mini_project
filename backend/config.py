@@ -22,3 +22,8 @@ MAX_CHUNKS = int(os.getenv("MAX_CHUNKS", 20))
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 # Ensure the uploads directory exists at import time (lightweight)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "chroma_db")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+
