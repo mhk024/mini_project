@@ -8,18 +8,20 @@ from typing import Optional, List
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from services.academic_intelligence import (
+from backend.services.academic_intelligence import (
     run_full_academic_analysis_async,
     extract_paper_metadata,
     compute_enhanced_quality,
     compute_novelty_score,
     get_domain_aware_trends_async,
 )
-from services.semantic_scholar import (
+from backend.services.semantic_scholar import (
     get_similar_papers,
+    get_influential_papers,
 )
-from services.openalex import (
+from backend.services.openalex import (
     search_works,
+    get_topic_trends,
     get_related_concepts,
 )
 

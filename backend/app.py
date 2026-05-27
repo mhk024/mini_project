@@ -24,10 +24,10 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from services.cache_manager import cache_manager
-from routes.academic import router as academic_router
-from services.resource_manager import get_llm, release_heavy_models
-import state
+from backend.services.cache_manager import cache_manager
+from backend.routes.academic import router as academic_router
+from backend.services.resource_manager import get_llm, release_heavy_models
+from backend import state
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -78,7 +78,7 @@ async def _load_context_async(filename: str):
 
         db = await asyncio.to_thread(create_or_load_db, file_path)
         try:
-            qa = await asyncio.to_thread(build_rag_chain, db)
+            qa = await asyncio.to_thread(build_rag_chain, db, file_path)
         except Exception as e:
             logger.error("Failed to initialize LLM or RAG chain: %s", e)
             raise HTTPException(status_code=500, detail="LLM initialization error")
@@ -270,12 +270,29 @@ async def ask(request: QuestionRequest):
         
         if cached:
             result = cached
+            if "pipeline" not in result:
+                result["pipeline"] = {
+                    "original_query": request.question,
+                    "enhanced_query": request.question,
+                    "retrieved_docs": [],
+                    "reranked_docs": []
+                }
+            if "summary" not in result:
+                result["summary"] = {
+                    "short": "",
+                    "simplified": "",
+                    "detailed": ""
+                }
+            elif isinstance(result["summary"], dict):
+                result["summary"].setdefault("short", "")
+                result["summary"].setdefault("simplified", "")
+                result["summary"].setdefault("detailed", "")
             answer_text = result.get("answer", "")
         else:
             answer = await state.qa_chain(request.question, mode=request.mode)
             answer_text = answer.get("answer", "")
             
-            # Extract key points and summary
+            # Extract key points
             sentences = [s.strip() for s in answer_text.replace("\n", " ").split('. ') if s]
             key_points = sentences[:5]
             
@@ -285,7 +302,14 @@ async def ask(request: QuestionRequest):
                 "key_points": key_points,
                 "summary": answer.get("summary", {
                     "short": (sentences[0] + ".") if sentences else "",
+                    "simplified": "",
                     "detailed": answer_text
+                }),
+                "pipeline": answer.get("pipeline", {
+                    "original_query": request.question,
+                    "enhanced_query": request.question,
+                    "retrieved_docs": [],
+                    "reranked_docs": []
                 }),
                 "sources": answer.get("sources", []),
                 "execution_time_ms": round((time.time() - start_time) * 1000, 2)
@@ -357,7 +381,17 @@ async def ask(request: QuestionRequest):
         return {
             "answer": f"An error occurred while processing your request: {detail}",
             "key_points": ["Request could not be completed."],
-            "summary": {"short": "Error occurred", "detailed": detail},
+            "summary": {
+                "short": "Error occurred",
+                "simplified": "Error occurred",
+                "detailed": detail
+            },
+            "pipeline": {
+                "original_query": request.question,
+                "enhanced_query": request.question,
+                "retrieved_docs": [],
+                "reranked_docs": []
+            },
             "sources": [],
             "execution_time_ms": round((time.time() - start_time) * 1000, 2)
         }
@@ -469,7 +503,7 @@ async def analyze_plagiarism():
 async def analyze_trends():
     try:
         text = await _get_active_document_text()
-        from services.academic_intelligence import run_full_academic_analysis_async
+        from backend.services.academic_intelligence import run_full_academic_analysis_async
         try:
             acad_res = await run_full_academic_analysis_async(text)
             trends_summary = acad_res.get("trends", {}).get("warning_message", "") or "Highly aligned with modern research."

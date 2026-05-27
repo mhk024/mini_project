@@ -14,7 +14,7 @@ from typing import Callable, Any
 import math
 from langchain_core.prompts import PromptTemplate
 
-from services.resource_manager import get_embeddings
+from backend.services.resource_manager import get_embeddings
 
 logger = logging.getLogger(__name__)
 
