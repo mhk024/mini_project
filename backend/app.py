@@ -289,7 +289,7 @@ async def ask(request: QuestionRequest):
             }
             await cache_manager.set(ckey, result, category="rag_chat")
 
-logger.info("Result /ask: %s", result)
+        logger.info("Result /ask: %s", result)
         
 
         # Update metrics in app_state.json
