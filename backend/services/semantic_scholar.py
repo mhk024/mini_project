@@ -31,8 +31,8 @@ except ImportError:
 
 import json
 
-from backend.services.cache_manager import cache_manager
-from backend.services.async_utils import retry_async
+from services.cache_manager import cache_manager
+from services.async_utils import retry_async
 
 logger = logging.getLogger(__name__)
 

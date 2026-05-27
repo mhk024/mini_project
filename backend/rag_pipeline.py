@@ -13,14 +13,15 @@ import math
 from typing import List, Dict, Any
 
 from langchain_core.prompts import PromptTemplate
-from backend.services.resource_manager import (
+from services.resource_manager import (
     get_embeddings,
     get_llm,
+    release_heavy_models,
     CHROMA_PERSIST_DIR,
     GROQ_MODEL,
     GROQ_API_KEY,
 )
-from backend.services.cache_manager import cache_manager
+from services.cache_manager import cache_manager
 from config import DUPLICATE_JACCARD_THRESHOLD, RETRIEVAL_RAW_K, RETRIEVAL_KEEP_K
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")

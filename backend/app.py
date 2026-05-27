@@ -24,9 +24,9 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from backend.services.cache_manager import cache_manager
-from backend.routes.academic import router as academic_router
-from backend.services.resource_manager import get_llm, release_heavy_models
+from services.cache_manager import cache_manager
+from routes.academic import router as academic_router
+from services.resource_manager import get_llm, release_heavy_models
 from backend import state
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -503,7 +503,7 @@ async def analyze_plagiarism():
 async def analyze_trends():
     try:
         text = await _get_active_document_text()
-        from backend.services.academic_intelligence import run_full_academic_analysis_async
+        from services.academic_intelligence import run_full_academic_analysis_async
         try:
             acad_res = await run_full_academic_analysis_async(text)
             trends_summary = acad_res.get("trends", {}).get("warning_message", "") or "Highly aligned with modern research."

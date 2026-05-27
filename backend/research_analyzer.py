@@ -8,8 +8,8 @@ import hashlib
 from typing import Optional, List, Dict, Any
 
 from langchain_core.prompts import PromptTemplate
-from backend.services.cache_manager import cache_manager
-from backend.services.async_utils import run_with_timeout
+from services.cache_manager import cache_manager
+from services.async_utils import run_with_timeout
 
 logger = logging.getLogger(__name__)
 

@@ -21,19 +21,19 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 
-from backend.services.semantic_scholar import (
+from services.semantic_scholar import (
     search_papers,
     get_similar_papers,
     get_influential_papers,
 )
-from backend.services.openalex import (
+from services.openalex import (
     search_works,
     get_topic_trends,
     get_related_concepts,
     get_trending_keywords,
 )
-from backend.services.cache_manager import cache_manager
-from backend.services.async_utils import run_with_timeout
+from services.cache_manager import cache_manager
+from services.async_utils import run_with_timeout
 
 logger = logging.getLogger(__name__)
 
