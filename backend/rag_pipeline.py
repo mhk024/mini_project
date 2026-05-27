@@ -16,7 +16,6 @@ from langchain_core.prompts import PromptTemplate
 from services.resource_manager import (
     get_embeddings,
     get_llm,
-    get_cross_encoder,
     CHROMA_PERSIST_DIR,
 )
 from config import DUPLICATE_JACCARD_THRESHOLD, RETRIEVAL_RAW_K, RETRIEVAL_KEEP_K
