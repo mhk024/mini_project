@@ -160,10 +160,28 @@ async def generate_summary_async(llm, context: str) -> Dict[str, str]:
 
 
 def build_rag_chain(db):
-    llm = get_llm()
+    # Initialize LLM with safe fallback
+    try:
+        llm = get_llm()
+    except Exception as e:
+        logger.error("Failed to initialize LLM: %s", e)
+        llm = None
+
+    # If no DB is provided, return a stub chain that reports missing index
+    if db is None:
+        async def rag_chain(question: str, mode: str = "student") -> Dict[str, Any]:
+            return {
+                "answer": "Document database not configured.",
+                "summary": {"short": "No DB", "detailed": "The backend does not have a vector store configured."},
+                "sources": [],
+            }
+        return rag_chain
 
     async def rag_chain(question: str, mode: str = "student") -> Dict[str, Any]:
         try:
+            # Ensure LLM is available
+            if llm is None:
+                raise RuntimeError("LLM not initialized")
             enhanced_q = await enhance_query_async(llm, question)
             raw_docs = await asyncio.to_thread(db.similarity_search, enhanced_q, k=RETRIEVAL_RAW_K)
             deduped = _deduplicate_chunks(raw_docs)
