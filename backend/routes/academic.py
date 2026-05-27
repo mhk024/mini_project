@@ -15,6 +15,7 @@ from services.academic_intelligence import (
     compute_enhanced_quality,
     compute_novelty_score,
     get_domain_aware_trends_async,
+    clean_research_query,
 )
 from services.semantic_scholar import (
     get_similar_papers,
@@ -83,7 +84,9 @@ async def similar_papers_endpoint(request: AnalysisRequest):
     try:
         text = await _get_document_text_async(request.filename)
         topic_data = extract_research_topic(text)
-        title = request.query or topic_data.get("semantic_query") or topic_data.get("title", "")
+        raw = request.query or topic_data.get("semantic_query") or topic_data.get("title", "")
+        # Stabilize query string before calling external academic APIs.
+        title = clean_research_query(raw, fallback_text=(topic_data.get("abstract_preview") or text[:1000]), min_words=5, max_words=12) or raw
         metadata = extract_paper_metadata(text)
 
         # Parallel fetch using semantic query for precision

@@ -60,6 +60,144 @@ TOPIC_STOPWORDS = {
 }
 MAX_QUERY_LENGTH = 120
 
+# Journal / website / boilerplate tokens that often pollute extracted "titles"
+NOISE_TOKENS = {
+    "www", "http", "https", "com", "org", "net", "edu", "pdf",
+    "available", "at", "copyright", "author", "authors", "rights", "reserved",
+    "open", "access", "license", "licence", "creativecommons",
+    "issn", "isbn", "doi", "vol", "volume", "issue", "pages", "page",
+    "international", "journal", "proceedings", "conference",
+    # weak filler words common in scraped titles
+    "comprehensive", "concept", "concepts", "survey",
+    # common scraped journal/site abbreviations
+    "ijsrst", "ijert", "ijrte", "ijeat", "ijarcs", "ijcs", "ijete", "ijcse",
+}
+
+PHRASE_BOOST = [
+    "artificial intelligence",
+    "machine learning",
+    "deep learning",
+    "neural networks",
+    "natural language processing",
+    "computer vision",
+    "reinforcement learning",
+    "transformer models",
+    "large language models",
+]
+
+
+def clean_research_query(text: str, fallback_text: str = "", min_words: int = 5, max_words: int = 12) -> str:
+    """
+    Extract a clean semantic topic query from noisy scraped text.
+
+    Constraints (by design):
+    - removes URLs / boilerplate / identifiers (ISSN/ISBN/DOI), repeated words, extra whitespace
+    - outputs 5–12 important words (when possible), lowercase normalized
+    - if the input is low quality, uses `fallback_text` (abstract/introduction/first paragraph)
+    """
+    def _strip_noise(s: str) -> str:
+        s = (s or "").replace("\u00a0", " ").strip()
+        if not s:
+            return ""
+        low = s.lower()
+        # remove URLs / domains
+        low = re.sub(r"https?://\S+", " ", low)
+        low = re.sub(r"\bwww\.[^\s]+\b", " ", low)
+        low = re.sub(r"\bwww\b", " ", low)
+        low = re.sub(r"\b\S+\.(com|org|net|edu)\b", " ", low)
+        # remove boilerplate phrases
+        low = re.sub(r"\bavailable\s+at\b", " ", low)
+        low = re.sub(r"\ball\s+rights\s+reserved\b", " ", low)
+        low = re.sub(r"\bthis\s+open\s+access\s+article\b", " ", low)
+        # remove identifiers / pagination
+        low = re.sub(r"\bissn\s*[:#]?\s*\d{4}\s*[-–]\s*\d{3}[\dx]\b", " ", low)
+        low = re.sub(r"\bisbn\s*[:#]?\s*(97[89][-\s]?)?\d{1,5}[-\s]?\d{1,7}[-\s]?\d{1,7}[-\s]?\d\b", " ", low)
+        low = re.sub(r"\bdoi\s*[:#]?\s*10\.\d{4,9}/\S+\b", " ", low)
+        low = re.sub(r"\bpp?\.\s*\d+(\s*[-–]\s*\d+)?\b", " ", low)
+        low = re.sub(r"\bpages?\s*\d+(\s*[-–]\s*\d+)?\b", " ", low)
+        low = re.sub(r"\b(19\d{2}|20\d{2})\b", " ", low)
+        # normalize punctuation to spaces
+        low = re.sub(r"[^a-z0-9\-\s]", " ", low)
+        low = re.sub(r"\s+", " ", low).strip()
+        return low
+
+    def _tokenize(s: str) -> list[str]:
+        toks = re.findall(r"\b[a-z][a-z0-9\-]{1,}\b", (s or "").lower())
+        out: list[str] = []
+        seen = set()
+        for t in toks:
+            if t in TOPIC_STOPWORDS or t in NOISE_TOKENS or t in GENERIC_TERMS or t in WEAK_TOPICS:
+                continue
+            if t.isdigit():
+                continue
+            if len(t) <= 2:
+                continue
+            # de-dupe repeated words (common in scraped headers)
+            if t in seen:
+                continue
+            seen.add(t)
+            out.append(t)
+        return out
+
+    def _looks_low_quality(raw: str, tokens: list[str]) -> bool:
+        if not raw or len(raw.strip()) < 10:
+            return True
+        low = raw.lower()
+        if "available at" in low or "open access" in low or "all rights reserved" in low:
+            return True
+        if re.search(r"https?://|www\.", low):
+            return True
+        # if most tokens are noise/stopwords, treat as low quality
+        if len(tokens) < 3:
+            return True
+        return False
+
+    raw = text or ""
+    stripped = _strip_noise(raw)
+    tokens = _tokenize(stripped)
+
+    if _looks_low_quality(raw, tokens) and fallback_text:
+        stripped_fb = _strip_noise(fallback_text[:1000])
+        tokens_fb = _tokenize(stripped_fb)
+        if len(tokens_fb) > len(tokens):
+            stripped, tokens = stripped_fb, tokens_fb
+
+    if not tokens:
+        return ""
+
+    # Boost known keyphrases (keep phrase words together and early)
+    phrase_tokens: list[str] = []
+    for phrase in PHRASE_BOOST:
+        ph = phrase.lower()
+        if ph in stripped:
+            phrase_tokens.extend([w for w in ph.split() if w not in TOPIC_STOPWORDS and w not in NOISE_TOKENS])
+
+    # Rank by frequency in the (stripped) text blob, lightly prefer longer tokens
+    freq = Counter(re.findall(r"\b[a-z][a-z0-9\-]{1,}\b", stripped))
+    ranked = sorted(tokens, key=lambda t: (-freq.get(t, 0), -len(t), t))
+
+    chosen: list[str] = []
+    seen = set()
+    for t in phrase_tokens + ranked:
+        if t in seen:
+            continue
+        seen.add(t)
+        chosen.append(t)
+        if len(chosen) >= max_words:
+            break
+
+    # Ensure min_words if we can (but do not exceed max_words)
+    if len(chosen) < min_words:
+        for t in ranked:
+            if t in seen:
+                continue
+            seen.add(t)
+            chosen.append(t)
+            if len(chosen) >= min_words or len(chosen) >= max_words:
+                break
+
+    return " ".join(chosen[:max_words]).strip().lower()
+
 DOMAIN_SUBDOMAINS = {
     "artificial intelligence": ["Machine Learning", "Deep Learning", "Natural Language Processing", "Computer Vision", "Reinforcement Learning"],
     "machine learning": ["Deep Learning", "Supervised Learning", "Unsupervised Learning", "Reinforcement Learning", "Neural Networks"],
@@ -340,28 +478,40 @@ def _compress_query(query: str, max_chars: int = MAX_QUERY_LENGTH) -> str:
 def extract_research_topic(document_text: str) -> dict:
     cleaned_text = _clean_document_for_topic_extraction(document_text)
     metadata = extract_paper_metadata(cleaned_text or document_text)
-    title = (metadata.get("title") or "").strip()
+    raw_title = (metadata.get("title") or "").strip()
     abstract = (metadata.get("abstract") or "").strip()
     first_para = _extract_first_meaningful_paragraph(cleaned_text or document_text)
+    fallback_blob = " ".join([abstract, first_para, (cleaned_text or document_text)[:1000]]).strip()
+
+    # Debug logging required by query-stabilization patch
+    logger.info("[RAW TITLE] %s", raw_title)
 
     probable_title = ""
-    for candidate in _extract_title_candidates(cleaned_text or document_text) + [title]:
-        clean = _clean_topic_phrase(re.sub(r"^\s*abstract\s*[:\-]?\s*", "", candidate or "", flags=re.IGNORECASE), max_words=14)
+    for candidate in _extract_title_candidates(cleaned_text or document_text) + [raw_title]:
+        candidate = re.sub(r"^\s*abstract\s*[:\-]?\s*", "", candidate or "", flags=re.IGNORECASE)
+        # aggressively clean noisy scraped headers before checking weakness
+        candidate = clean_research_query(candidate, fallback_text="", min_words=3, max_words=12) or candidate
+        clean = _clean_topic_phrase(candidate, max_words=14)
         if clean and not _is_weak_topic(clean):
             probable_title = clean
             break
     if not probable_title:
-        probable_title = _clean_topic_phrase(title, max_words=12) or "Research topic"
+        probable_title = _clean_topic_phrase(raw_title, max_words=12) or "Research topic"
 
     keywords = _extract_keywords(" ".join([probable_title, abstract, first_para]), top_n=8)
     if not keywords:
         keywords = _top_keywords_from_texts([probable_title, abstract, first_para], top_n=6)
 
-    semantic_query = _compress_query(" ".join(([probable_title] + keywords[:5])), max_chars=MAX_QUERY_LENGTH)
-    if len(semantic_query.split()) < 2:
-        semantic_query = _compress_query(" ".join(keywords[:5]), max_chars=MAX_QUERY_LENGTH)
+    # Core fix: build a short, clean API query (5–12 important words), with fallback to abstract/introduction.
+    semantic_query = clean_research_query(raw_title or probable_title, fallback_text=fallback_blob, min_words=5, max_words=12)
+    cleaned_query_dbg = semantic_query
     if not semantic_query:
-        semantic_query = _compress_query(probable_title, max_chars=MAX_QUERY_LENGTH) or "artificial intelligence machine learning"
+        semantic_query = clean_research_query(" ".join(keywords[:8]), fallback_text=fallback_blob, min_words=4, max_words=10)
+    if not semantic_query:
+        semantic_query = "artificial intelligence machine learning trends"
+
+    logger.info("[CLEANED QUERY] %s", cleaned_query_dbg or semantic_query)
+    logger.info("[API SEARCH QUERY] %s", semantic_query)
 
     return {
         "title": probable_title,
@@ -410,6 +560,16 @@ def _build_fallback_queries(topic: str) -> list[str]:
     compact = " ".join(words[:3]).strip()
     if compact:
         fallbacks.append(compact)
+    # noun-phrase-ish bigrams from the cleaned query
+    if len(words) >= 5:
+        bigrams = []
+        for i in range(min(len(words) - 1, 10)):
+            a, b = words[i], words[i + 1]
+            if a.lower() in TOPIC_STOPWORDS or b.lower() in TOPIC_STOPWORDS:
+                continue
+            bigrams.append(f"{a} {b}")
+        if bigrams:
+            fallbacks.append(" ".join(bigrams[:3]))
     # preserve order and uniqueness
     seen = set()
     uniq = []
@@ -476,7 +636,7 @@ async def _multi_strategy_academic_search(topic_data: dict, per_source_limit: in
 
         all_papers.extend(ss_batch)
         all_papers.extend(oa_batch)
-        logger.info("[PAPERS FOUND] strategy=%s cumulative=%d", label, len(all_papers))
+        logger.info("[SIMILAR PAPERS FOUND] strategy=%s ss=%d oa=%d cumulative=%d", label, len(ss_batch), len(oa_batch), len(all_papers))
 
     return all_papers, used_ss_query, used_oa_query
 
