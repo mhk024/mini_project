@@ -96,7 +96,7 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("Research Assistant API shutting down")
         # Release heavy models to free memory on shutdown
-        release_heavy_models()
+    release_heavy_models()
 
 
 app = FastAPI(lifespan=lifespan)
