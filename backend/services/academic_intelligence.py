@@ -18,6 +18,7 @@ import time
 import hashlib
 import logging
 import asyncio
+import math
 from datetime import datetime
 from typing import Optional
 
@@ -34,6 +35,28 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 GENERIC_TERMS = {"online", "system", "study", "analysis", "review", "approach", "method", "evaluation", "design", "model"}
 WEAK_TOPICS = {"online", "paper", "research", "document", "ai", "ml"}
+NOISE_LINE_PATTERNS = [
+    r"\bcopyright\b",
+    r"\ball rights reserved\b",
+    r"\bopen access\b",
+    r"\blicen[cs]e\b",
+    r"\bauthor contributions?\b",
+    r"\bconflict of interest\b",
+    r"\bissn\b",
+    r"\bdoi\b",
+    r"\breceived\b",
+    r"\baccepted\b",
+    r"\bpublished online\b",
+    r"\bjournal\b",
+    r"\bpreprint\b",
+]
+TOPIC_STOPWORDS = {
+    "the", "and", "for", "with", "from", "that", "this", "these", "those", "using",
+    "into", "are", "was", "were", "have", "has", "had", "can", "could", "should",
+    "will", "would", "about", "paper", "research", "study", "document", "online",
+    "approach", "method", "analysis", "results", "based", "between", "within", "their",
+    "our", "its", "also", "such", "more", "most", "than", "over", "article", "authors",
+}
 
 DOMAIN_SUBDOMAINS = {
     "artificial intelligence": ["Machine Learning", "Deep Learning", "Natural Language Processing", "Computer Vision", "Reinforcement Learning"],
@@ -159,29 +182,165 @@ def _is_weak_topic(topic: str) -> bool:
     return all(w in WEAK_TOPICS for w in words)
 
 
+def _looks_like_noise_line(line: str) -> bool:
+    low = (line or "").strip().lower()
+    if not low:
+        return True
+    for pat in NOISE_LINE_PATTERNS:
+        if re.search(pat, low):
+            return True
+    if re.match(r"^(vol|volume|issue|pages?)\b", low):
+        return True
+    if re.search(r"\b\d{4}\b", low) and len(low) < 24:
+        return True
+    return False
+
+
+def _clean_topic_phrase(topic: str, max_words: int = 12) -> str:
+    one_line = re.sub(r"\s+", " ", (topic or "").strip())
+    one_line = re.sub(r"[^\w\s\-\(\)]", " ", one_line)
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9\-]{1,}", one_line)
+    cleaned = []
+    seen = set()
+    for t in tokens:
+        key = t.lower()
+        if key in TOPIC_STOPWORDS:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(t)
+        if len(cleaned) >= max_words:
+            break
+    return " ".join(cleaned).strip()
+
+
+def _extract_title_candidates(document_text: str) -> list[str]:
+    raw_lines = [l.strip() for l in (document_text or "").splitlines()]
+    head = [l for l in raw_lines[:80] if l]
+    candidates = []
+    for i, line in enumerate(head):
+        if _looks_like_noise_line(line):
+            continue
+        if len(line) < 15 or len(line) > 180:
+            continue
+        if re.match(r"^\d+(\.\d+)*\s+", line):
+            continue
+        # Prioritize first-page title-like lines with higher lexical density.
+        words = re.findall(r"[A-Za-z][A-Za-z\-]{2,}", line)
+        if len(words) < 3:
+            continue
+        uppercase_ratio = sum(1 for c in line if c.isupper()) / max(1, len([c for c in line if c.isalpha()]))
+        score = (3.0 if i < 18 else 0.0) + (2.0 if 0.08 <= uppercase_ratio <= 0.55 else 0.0) + min(len(words) / 8.0, 2.0)
+        if ":" in line:
+            score += 0.5
+        candidates.append((score, line))
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return [c[1] for c in candidates[:5]]
+
+
 def extract_research_topic(document_text: str) -> str:
     metadata = extract_paper_metadata(document_text)
     title = (metadata.get("title") or "").strip()
     abstract = (metadata.get("abstract") or "").strip()
     first_para = _extract_first_meaningful_paragraph(document_text)
 
-    candidates = [title, abstract[:180], first_para[:180]]
+    title_candidates = _extract_title_candidates(document_text)
+    candidates = title_candidates + [title, abstract[:180], first_para[:180]]
     for candidate in candidates:
         if not candidate:
             continue
         # Strip "Abstract:" prefix when present.
         clean = re.sub(r"^\s*abstract\s*[:\-]?\s*", "", candidate, flags=re.IGNORECASE).strip()
-        words = re.findall(r"[A-Za-z][A-Za-z\-]{2,}", clean)
-        if not words:
+        if _looks_like_noise_line(clean):
             continue
-        topic = " ".join(words[:8]).strip()
-        if topic and not _is_weak_topic(topic) and len(topic) >= 8:
+        topic = _clean_topic_phrase(clean, max_words=12)
+        wc = len(topic.split())
+        if topic and 3 <= wc <= 12 and not _is_weak_topic(topic):
             return topic
 
-    fallback_keywords = _top_keywords_from_texts([title, abstract], top_n=4)
+    fallback_keywords = _top_keywords_from_texts([title, abstract, first_para], top_n=5)
     if fallback_keywords:
-        return " ".join(fallback_keywords)
-    return title or "No strong academic matches found."
+        return _clean_topic_phrase(" ".join(fallback_keywords), max_words=8)
+    return _clean_topic_phrase(title, max_words=10) or "Research topic"
+
+
+def clean_search_query(topic: str, max_chars: int = 80) -> str:
+    query = (topic or "").replace("\n", " ").strip()
+    query = re.sub(r"[^\w\s\-]", " ", query)
+    query = re.sub(r"\s+", " ", query).strip()
+    words = re.findall(r"[A-Za-z][A-Za-z0-9\-]{1,}", query)
+    dedup = []
+    seen = set()
+    for w in words:
+        k = w.lower()
+        if k in TOPIC_STOPWORDS:
+            continue
+        if k in seen:
+            continue
+        seen.add(k)
+        dedup.append(w)
+    cleaned = " ".join(dedup).strip()
+    return cleaned[:max_chars].strip()
+
+
+def _build_fallback_queries(topic: str) -> list[str]:
+    cleaned = clean_search_query(topic)
+    words = cleaned.split()
+    fallbacks = []
+    if cleaned:
+        fallbacks.append(cleaned)
+    if len(words) >= 2:
+        fallbacks.append(" ".join(words[:2]))
+    if len(words) >= 4:
+        # keyword-only compressed form
+        initials = []
+        for w in words:
+            if w.lower() in {"artificial", "intelligence"}:
+                initials.append("AI")
+            else:
+                initials.append(w)
+        fallbacks.append(" ".join(initials[:3]))
+    compact = " ".join(words[:3]).strip()
+    if compact:
+        fallbacks.append(compact)
+    # preserve order and uniqueness
+    seen = set()
+    uniq = []
+    for q in fallbacks:
+        k = q.lower()
+        if k and k not in seen:
+            seen.add(k)
+            uniq.append(q[:80])
+    return uniq[:4]
+
+
+def _tokenize_for_similarity(text: str) -> list[str]:
+    return [t for t in re.findall(r"\b[a-z][a-z0-9\-]{2,}\b", (text or "").lower()) if t not in TOPIC_STOPWORDS]
+
+
+def _tfidf_cosine_similarity(doc_a: str, doc_b: str) -> float:
+    tokens_a = _tokenize_for_similarity(doc_a)
+    tokens_b = _tokenize_for_similarity(doc_b)
+    if not tokens_a or not tokens_b:
+        return 0.0
+    vocab = set(tokens_a) | set(tokens_b)
+    if not vocab:
+        return 0.0
+    tf_a = {t: tokens_a.count(t) / len(tokens_a) for t in vocab}
+    tf_b = {t: tokens_b.count(t) / len(tokens_b) for t in vocab}
+    idf = {}
+    for t in vocab:
+        df = int(t in set(tokens_a)) + int(t in set(tokens_b))
+        idf[t] = math.log((2 + 1) / (df + 1)) + 1.0
+    vec_a = {t: tf_a[t] * idf[t] for t in vocab}
+    vec_b = {t: tf_b[t] * idf[t] for t in vocab}
+    dot = sum(vec_a[t] * vec_b[t] for t in vocab)
+    mag_a = math.sqrt(sum(v * v for v in vec_a.values()))
+    mag_b = math.sqrt(sum(v * v for v in vec_b.values()))
+    if mag_a == 0 or mag_b == 0:
+        return 0.0
+    return dot / (mag_a * mag_b)
 
 
 # ─────────────────────────────────────────────
@@ -458,7 +617,8 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
     start_time = time.time()
     metadata = extract_paper_metadata(document_text)
     topic = extract_research_topic(document_text)
-    logger.info("[RESEARCH] Topic extracted: %s", topic)
+    logger.info("[TOPIC] Extracted topic: %s", topic)
+    fallback_queries = _build_fallback_queries(topic)
 
     # Safe defaults to prevent researcher pipeline crashes on API/network issues.
     ss_similar = []
@@ -472,27 +632,37 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
     oa_concepts = []
     oa_works = []
 
-    try:
-        ss_similar = await run_with_timeout(
-            search_semantic_scholar(topic, limit=5),
-            10,
-            fallback_value=[],
-        ) or []
-    except Exception:
-        logger.exception("[RESEARCH] Semantic Scholar search failed for topic=%s", topic)
-        ss_similar = []
-    logger.info("[RESEARCH] Semantic Scholar papers: %d", len(ss_similar))
+    used_ss_query = ""
+    for q in fallback_queries:
+        logger.info("[SEARCH] Semantic Scholar query: %s", q)
+        used_ss_query = q
+        try:
+            ss_similar = await run_with_timeout(
+                search_semantic_scholar(q, limit=5),
+                10,
+                fallback_value=[],
+            ) or []
+        except Exception:
+            logger.exception("[RESEARCH] Semantic Scholar search failed for query=%s", q)
+            ss_similar = []
+        if ss_similar:
+            break
 
-    try:
-        oa_similar = await run_with_timeout(
-            search_openalex(topic, limit=5),
-            10,
-            fallback_value=[],
-        ) or []
-    except Exception:
-        logger.exception("[RESEARCH] OpenAlex search failed for topic=%s", topic)
-        oa_similar = []
-    logger.info("[RESEARCH] OpenAlex papers: %d", len(oa_similar))
+    used_oa_query = ""
+    for q in fallback_queries:
+        logger.info("[SEARCH] OpenAlex query: %s", q)
+        used_oa_query = q
+        try:
+            oa_similar = await run_with_timeout(
+                search_openalex(q, limit=5),
+                10,
+                fallback_value=[],
+            ) or []
+        except Exception:
+            logger.exception("[RESEARCH] OpenAlex search failed for query=%s", q)
+            oa_similar = []
+        if oa_similar:
+            break
 
     try:
         ss_influential = await run_with_timeout(
@@ -536,12 +706,17 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
             "venue": paper.get("venue") or "",
             "url": paper.get("url") or "",
             "abstract": paper.get("abstract") or "",
-            "source_api": paper.get("source_api") or "",
+            "source_api": paper.get("source_api") or paper.get("source") or "",
+            "relevance_score": paper.get("relevance_score", 0.0),
         })
 
-    merged_papers = normalized_papers[:8]
+    merged_papers = sorted(
+        normalized_papers,
+        key=lambda p: (int(p.get("citation_count", 0) or 0), float(p.get("relevance_score", 0.0))),
+        reverse=True,
+    )[:8]
     oa_works = oa_similar
-    logger.info("[RESEARCH] Similar papers merged: %d", len(merged_papers))
+    logger.info("[SEARCH] Papers found: %d", len(merged_papers))
 
     if not merged_papers:
         warnings.append("External academic APIs unavailable")
@@ -624,10 +799,22 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
                 "suggestion": "No strong academic matches found.",
                 "details": "Try uploading a paper with a clearer abstract/title for better discovery."
             }]
+    abstract_texts = [p.get("abstract", "") for p in merged_papers if (p.get("abstract") or "").strip()]
+    ranked_overlap = []
+    for p in merged_papers:
+        score = _tfidf_cosine_similarity(document_text[:5000], p.get("abstract", ""))
+        ranked_overlap.append((p, score))
+    ranked_overlap.sort(key=lambda x: x[1], reverse=True)
+    similarity_percent = round((sum(s for _, s in ranked_overlap) / len(ranked_overlap)) * 100, 1) if ranked_overlap else 0.0
+    logger.info("[SIMILARITY] Compared against %d abstracts", len(abstract_texts))
+
     overlap_analysis = {
         "enabled": bool(merged_papers),
         "status": "insufficient_reference_data" if not merged_papers else "available",
         "paper_count": len(merged_papers),
+        "similarity_percent": similarity_percent,
+        "plagiarism_message": "Low confidence — insufficient comparison papers" if not merged_papers else f"Estimated overlap: {similarity_percent}%",
+        "compared_abstracts": len(abstract_texts),
     }
 
     elapsed = round(time.time() - start_time, 2)
@@ -644,6 +831,9 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
         "suggestions":        suggestions,
         "overlap_analysis":   overlap_analysis,
         "warnings":           warnings,
+        "extracted_topic":    topic,
+        "fallback_query_used": used_ss_query or used_oa_query or clean_search_query(topic),
+        "papers_searched":    len(merged_papers),
         "success":            True,
         "analysis_time_s":    elapsed,
         "status":             "success",

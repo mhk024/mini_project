@@ -654,31 +654,28 @@ async def analyze_plagiarism():
         analysis = await run_full_academic_analysis_async(text)
         papers = analysis.get("similar_papers", []) or []
 
-        def _jaccard(a: str, b: str) -> float:
-            import re as _re
-
-            ta = set(_re.findall(r"\b[a-z]{4,}\b", (a or "").lower()))
-            tb = set(_re.findall(r"\b[a-z]{4,}\b", (b or "").lower()))
-            if not ta or not tb:
-                return 0.0
-            inter = len(ta & tb)
-            union = len(ta | tb)
-            return inter / union if union > 0 else 0.0
-
-        overlaps = []
-        for p in papers:
-            score = _jaccard(text, f"{p.get('title','')} {p.get('abstract','')}")
-            overlaps.append(score)
-
-        avg_overlap = sum(overlaps) / len(overlaps) if overlaps else 0.0
-        if avg_overlap >= 0.35:
+        overlap_info = analysis.get("overlap_analysis", {}) or {}
+        avg_overlap = float(overlap_info.get("similarity_percent", 0.0) or 0.0) / 100.0
+        if avg_overlap >= 0.45:
             level = "High conceptual similarity"
-        elif avg_overlap >= 0.18:
+        elif avg_overlap >= 0.22:
             level = "Moderate thematic overlap"
         else:
             level = "Low overlap"
 
+        novelty_value = analysis.get("novelty_score")
+        novelty_text = f"{round(float(novelty_value) * 10, 1)}%" if novelty_value is not None else "0%"
+        overlap_text = overlap_info.get("plagiarism_message") or "Low confidence — insufficient comparison papers"
+
         return {
+            "plagiarism": {
+                "plagiarism_risk": level,
+                "novelty_score": novelty_text,
+                "overlap_analysis": overlap_text,
+                "similar_papers_summary": [p.get("title", "") for p in papers[:5] if p.get("title")],
+                "missing_references": [m.get("title", "") for m in (analysis.get("missing_citations") or [])[:5] if m.get("title")],
+                "improvements": [s.get("suggestion", "") for s in (analysis.get("suggestions") or [])[:5] if s.get("suggestion")],
+            },
             "literature_overlap_insights": {
                 "level": level,
                 "average_overlap_score": round(avg_overlap, 3),

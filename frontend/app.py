@@ -1149,8 +1149,8 @@ elif st.session_state.mode == "researcher":
         if p_data:
             plag = p_data.get("plagiarism", {})
             risk = plag.get("plagiarism_risk", "Unknown")
-            novelty = plag.get("novelty_score", "N/A")
-            overlap = plag.get("overlap_analysis", "")
+            novelty = plag.get("novelty_score", "0%")
+            overlap = plag.get("overlap_analysis", "Low confidence — insufficient comparison papers")
             
             rb = risk_badge(risk)
             st.markdown(f"""
@@ -1387,7 +1387,10 @@ elif st.session_state.mode == "researcher":
                     st.session_state.academic_similar = {
                         "status": data.get("status"),
                         "document_title": data.get("document_title"),
-                        "papers": data.get("similar_papers", [])
+                        "papers": data.get("similar_papers", []),
+                        "extracted_topic": data.get("extracted_topic", ""),
+                        "fallback_query_used": data.get("fallback_query_used", ""),
+                        "papers_searched": data.get("papers_searched", 0),
                     }
                     st.session_state.academic_quality = {
                         "status": data.get("status"),
@@ -1429,6 +1432,13 @@ elif st.session_state.mode == "researcher":
         if sim_data and sim_data.get("papers"):
             papers = sim_data["papers"]
             st.caption(f"Found {len(papers)} related papers · Semantic Scholar + OpenAlex")
+            extracted_topic = sim_data.get("extracted_topic")
+            fallback_query = sim_data.get("fallback_query_used")
+            papers_searched = sim_data.get("papers_searched", len(papers))
+            if extracted_topic:
+                st.caption(f"Extracted topic: {extracted_topic}")
+            if fallback_query:
+                st.caption(f"Fallback query used: {fallback_query} · Papers searched: {papers_searched}")
 
             cards_html = '<div class="papers-scroll">'
             for p in papers[:10]:
@@ -1473,7 +1483,7 @@ elif st.session_state.mode == "researcher":
             cards_html += '</div>'
             st.markdown(cards_html, unsafe_allow_html=True)
         elif sim_data:
-            st.info("No similar papers found.")
+            st.info("No strong semantic matches found for this topic.")
         else:
             st.info("Click 'Run Full Academic Analysis' above to discover similar papers from Semantic Scholar and OpenAlex.")
 

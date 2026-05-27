@@ -1,5 +1,6 @@
 import logging
 from typing import List, Dict
+import re
 
 from services.semantic_scholar import search_papers as _ss_search_papers
 from services.openalex import search_works as _oa_search_works
@@ -7,6 +8,34 @@ from services.cache_manager import cache_manager
 
 
 logger = logging.getLogger(__name__)
+
+
+def _tokenize_query(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9][a-z0-9\-]{1,}", (text or "").lower())
+
+
+def _relevance_score(query: str, title: str, abstract: str) -> float:
+    q_tokens = set(_tokenize_query(query))
+    if not q_tokens:
+        return 0.0
+    t_tokens = set(_tokenize_query(f"{title} {abstract}"))
+    if not t_tokens:
+        return 0.0
+    overlap = len(q_tokens & t_tokens)
+    return overlap / max(1, len(q_tokens))
+
+
+def _is_low_quality_paper(paper: Dict) -> bool:
+    title = (paper.get("title") or "").strip()
+    abstract = (paper.get("abstract") or "").strip()
+    citations = int(paper.get("citation_count", 0) or 0)
+    year = paper.get("year")
+    if not title or len(title) < 12:
+        return True
+    # Keep recent but uncited papers if they still have meaningful abstracts.
+    if not abstract and citations == 0 and (not year or int(year) < 2010):
+        return True
+    return False
 
 
 async def search_semantic_scholar(topic: str, limit: int = 5) -> List[Dict]:
@@ -43,17 +72,25 @@ async def search_semantic_scholar(topic: str, limit: int = 5) -> List[Dict]:
     for p in raw_papers[:limit]:
         if not p:
             continue
-        norm.append(
-            {
-                "title": p.get("title", "") or "",
-                "authors": p.get("authors", []) or [],
-                "year": p.get("year"),
-                "abstract": p.get("abstract", "") or "",
-                "citation_count": int(p.get("citation_count", 0) or 0),
-                "url": p.get("url", "") or "",
-                "source": "SemanticScholar",
-            }
-        )
+        item = {
+            "title": p.get("title", "") or "",
+            "authors": p.get("authors", []) or [],
+            "year": p.get("year"),
+            "abstract": p.get("abstract", "") or "",
+            "citation_count": int(p.get("citation_count", 0) or 0),
+            "url": p.get("url", "") or "",
+            "source": "SemanticScholar",
+            "source_api": "Semantic Scholar",
+        }
+        if _is_low_quality_paper(item):
+            continue
+        item["relevance_score"] = round(_relevance_score(topic, item["title"], item["abstract"]), 3)
+        norm.append(item)
+
+    norm.sort(
+        key=lambda p: (int(p.get("citation_count", 0) or 0), float(p.get("relevance_score", 0.0))),
+        reverse=True,
+    )
 
     await cache_manager.set(key, norm, category="academic_search")
     return norm
@@ -85,17 +122,27 @@ async def search_openalex(topic: str, limit: int = 5) -> List[Dict]:
     for w in raw_works[:limit]:
         if not w:
             continue
-        norm.append(
-            {
-                "title": w.get("title", "") or "",
-                "authors": w.get("authors", []) or [],
-                "year": w.get("year"),
-                "abstract": w.get("abstract", "") or "",
-                "citation_count": int(w.get("citation_count", 0) or 0),
-                "url": w.get("url", "") or "",
-                "source": "OpenAlex",
-            }
-        )
+        item = {
+            "title": w.get("title", "") or "",
+            "authors": w.get("authors", []) or [],
+            "year": w.get("year"),
+            "abstract": w.get("abstract", "") or "",
+            "citation_count": int(w.get("citation_count", 0) or 0),
+            "url": (w.get("open_access_url") or w.get("url") or ""),
+            "source": "OpenAlex",
+            "source_api": "OpenAlex",
+            "concepts": w.get("concepts", []) or [],
+            "open_access_url": w.get("open_access_url", "") or "",
+        }
+        if _is_low_quality_paper(item):
+            continue
+        item["relevance_score"] = round(_relevance_score(topic, item["title"], item["abstract"]), 3)
+        norm.append(item)
+
+    norm.sort(
+        key=lambda p: (int(p.get("citation_count", 0) or 0), float(p.get("relevance_score", 0.0))),
+        reverse=True,
+    )
 
     await cache_manager.set(key, norm, category="academic_search")
     return norm
