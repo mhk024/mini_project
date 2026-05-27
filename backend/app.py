@@ -10,8 +10,7 @@ import time
 import gc
 import logging
 import asyncio
-
-# import psutil  # Removed to eliminate external dependency
+from threading import Lock
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 load_dotenv()
@@ -55,7 +54,7 @@ def _evict_contexts_if_needed():
         logger.info("Evicted context for %s (max=%s)", evicted_name, state.MAX_LOADED_CONTEXTS)
 
 
-async def _load_context_async(filename: str):
+async def _load_context_async(filename: str, file_path: str | None = None):
     """Load vector DB + RAG chain on demand (thread pool for CPU/IO heavy work)."""
     load_start = time.time()
     if filename in state.loaded_contexts:
@@ -66,7 +65,8 @@ async def _load_context_async(filename: str):
         logger.info(f"Context {filename} loaded from cache in {(time.time() - load_start)*1000:.2f} ms")
         return
 
-    file_path = os.path.join(DATASET_DIR, filename)
+    if not file_path:
+        file_path = os.path.join(DATASET_DIR, filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -166,6 +166,72 @@ from utils import status as file_status
 USERS_FILE = "users.json"
 HISTORY_FILE = "history.json"
 APP_STATE_FILE = "app_state.json"
+REGISTRY_FILE_PATH = os.path.join(os.path.dirname(__file__), "uploads", "file_registry.json")
+registry_lock = Lock()
+
+def load_file_registry() -> dict:
+    """Load the file registry from the JSON file. Return empty dict if missing/malformed."""
+    logger.info("Loading file registry from %s", REGISTRY_FILE_PATH)
+    if not os.path.exists(REGISTRY_FILE_PATH):
+        logger.info("File registry does not exist at %s, returning empty dict", REGISTRY_FILE_PATH)
+        return {}
+    try:
+        with registry_lock:
+            with open(REGISTRY_FILE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if not isinstance(data, dict):
+                    logger.warning("File registry JSON is not a dictionary, returning empty dict")
+                    return {}
+                logger.info("Successfully loaded %d entries from file registry", len(data))
+                return data
+    except Exception as e:
+        logger.error("Failed to load file registry from %s: %s. Returning fallback empty dict", REGISTRY_FILE_PATH, e)
+        return {}
+
+def save_file_registry(registry: dict) -> None:
+    """Save the file registry to the JSON file in a thread-safe and robust manner."""
+    logger.info("Saving file registry to %s with %d entries", REGISTRY_FILE_PATH, len(registry))
+    try:
+        os.makedirs(os.path.dirname(REGISTRY_FILE_PATH), exist_ok=True)
+        tmp_path = REGISTRY_FILE_PATH + ".tmp"
+        with registry_lock:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(registry, f, indent=2)
+            os.replace(tmp_path, REGISTRY_FILE_PATH)
+        logger.info("Successfully saved file registry to %s", REGISTRY_FILE_PATH)
+    except Exception as e:
+        logger.error("Failed to save file registry: %s", e)
+
+def register_uploaded_file(file_id: str, filename: str, file_path: str) -> None:
+    """Register an uploaded file in the global FILE_REGISTRY and persist immediately."""
+    logger.info("Registering uploaded file: file_id=%s, filename=%s, path=%s", file_id, filename, file_path)
+    FILE_REGISTRY[file_id] = {
+        "filename": filename,
+        "path": file_path,
+        "uploaded": True,
+        "indexed": False,
+        "created_at": datetime.utcnow().isoformat()
+    }
+    save_file_registry(FILE_REGISTRY)
+
+# Load registry on startup
+FILE_REGISTRY = load_file_registry()
+
+# Synchronize FILE_REGISTRY with file_status status records
+for fid, info in FILE_REGISTRY.items():
+    try:
+        current_status = file_status.get_status(fid)
+        if not current_status.get("filename"):
+            file_status.set_status(fid, {
+                "uploaded": info.get("uploaded", True),
+                "processing": False,
+                "indexed": info.get("indexed", False),
+                "error": None,
+                "filename": info.get("filename"),
+            })
+            logger.info("Synchronized file_id %s from registry to status cache", fid)
+    except Exception as e:
+        logger.error("Failed to sync file_id %s to file_status: %s", fid, e)
 
 
 def load_json_file(file_path: str, default: dict) -> dict:
@@ -284,6 +350,10 @@ async def index_file(file_id: str, file_path: str):
             "error": None,
             "filename": os.path.basename(file_path),
         })
+        # Update indexed status in persistent registry
+        if file_id in FILE_REGISTRY:
+            FILE_REGISTRY[file_id]["indexed"] = True
+            save_file_registry(FILE_REGISTRY)
         logger.info("Indexing completed for %s", file_path)
     except Exception as e:
         logger.exception("Indexing failed for %s", file_path)
@@ -311,21 +381,37 @@ async def ask(request: QuestionRequest):
             raise HTTPException(status_code=400, detail="No file identifier provided")
 
         if request.file_id:
+            # resolve file_id from registry
+            file_info = FILE_REGISTRY.get(request.file_id)
+            if not file_info:
+                logger.error("Missing registry entry for file_id: %s", request.file_id)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No registry entry for file_id={request.file_id}"
+                )
+            
+            file_path = file_info["path"]
+            filename = file_info["filename"]
+            logger.info("Registry lookup success: file_id=%s resolves to filename=%s, path=%s", request.file_id, filename, file_path)
+
+            if not os.path.exists(file_path):
+                logger.error("Missing file on disk: %s", file_path)
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Stored file missing: {file_path}"
+                )
+
             # Ensure the document is indexed before answering
             status = file_status.get_status(request.file_id)
             if not status.get("indexed"):
                 # Trigger background indexing if not already started
                 if not status.get("processing"):
                     file_status.set_status(request.file_id, {"processing": True})
-                    # Build full path for the uploaded file
-                    filename = status.get("filename")
-                    if not filename:
-                        raise HTTPException(status_code=400, detail="Filename not found for file_id")
-                    file_path = os.path.join(DATASET_DIR, filename)
                     asyncio.create_task(index_file(request.file_id, file_path))
                 raise HTTPException(status_code=503, detail="Document is being processed")
-            # Load context using the original filename stored in status
-            await _load_context_async(status.get("filename"))
+            
+            # Load context using the resolved path and filename
+            await _load_context_async(filename, file_path=file_path)
         else:
             # Fallback to legacy filename handling
             await _load_context_async(request.filename)
@@ -628,8 +714,10 @@ async def upload_file(file: UploadFile = File(...)):
         with open(file_path, "wb") as f:
             f.write(content)
 
-        # Generate a UUID for this upload and initialise status record
+        # Generate a UUID for this upload and register
         file_id = str(uuid.uuid4())
+        register_uploaded_file(file_id, file.filename, file_path)
+
         file_status.set_status(file_id, {
             "uploaded": True,
             "processing": False,
@@ -642,7 +730,12 @@ async def upload_file(file: UploadFile = File(...)):
         if os.getenv("PRELOAD_ON_UPLOAD", "false").lower() in ("1", "true", "yes"):
             await _load_context_async(file.filename)
 
-        return {"message": "Success", "filename": file.filename, "file_id": file_id}
+        return {
+            "status": "ok",
+            "message": "Success",
+            "file_id": file_id,
+            "filename": file.filename
+        }
     except Exception as e:
         logger.error("Upload error: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
