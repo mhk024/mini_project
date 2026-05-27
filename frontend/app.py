@@ -423,6 +423,13 @@ def render_empty_state(message: str, icon: str = "🗂"):
     )
 
 
+def render_elegant_empty_card(message: str, icon: str = "📭", retry_key: str = "", retry_label: str = "Retry") -> bool:
+    render_empty_state(message, icon)
+    if retry_key:
+        return st.button(f"↻ {retry_label}", key=retry_key, use_container_width=True)
+    return False
+
+
 def render_skeleton_state(lines: int = 4, chart: bool = False):
     line_blocks = "".join('<div class="skeleton-line"></div>' for _ in range(max(1, lines)))
     chart_block = '<div class="skeleton-chart"></div>' if chart else ""
@@ -1666,6 +1673,11 @@ elif st.session_state.mode == "researcher":
                         "document_title": data.get("document_title"),
                         "papers": data.get("similar_papers", []),
                         "extracted_topic": data.get("extracted_topic", ""),
+                        "clean_topic_title": data.get("clean_topic_title", ""),
+                        "domain": data.get("domain", ""),
+                        "subdomain": data.get("subdomain", ""),
+                        "confidence": data.get("confidence", 0.0),
+                        "fallback_method": data.get("fallback_method", "none"),
                         "fallback_query_used": data.get("fallback_query_used", ""),
                         "papers_searched": data.get("papers_searched", 0),
                     }
@@ -1678,6 +1690,10 @@ elif st.session_state.mode == "researcher":
                         "status": data.get("status"),
                         "document_title": data.get("document_title"),
                         "trends": data.get("trends", {}),
+                        "topic_title": data.get("clean_topic_title", ""),
+                        "domain": data.get("domain", ""),
+                        "subdomain": data.get("subdomain", ""),
+                        "confidence": data.get("confidence", 0.0),
                         "related_concepts": data.get("related_concepts", []),
                         "trending_keywords": data.get("trending_keywords", [])
                     }
@@ -1709,11 +1725,17 @@ elif st.session_state.mode == "researcher":
         if sim_data and sim_data.get("papers"):
             papers = sim_data["papers"]
             st.caption(f"Found {len(papers)} related papers · Semantic Scholar + OpenAlex")
-            extracted_topic = sim_data.get("extracted_topic")
+            extracted_topic = sim_data.get("clean_topic_title") or sim_data.get("extracted_topic")
             fallback_query = sim_data.get("fallback_query_used")
             papers_searched = sim_data.get("papers_searched", len(papers))
+            domain = sim_data.get("domain", "")
+            confidence = float(sim_data.get("confidence", 0.0) or 0.0)
             if extracted_topic:
-                st.caption(f"Extracted topic: {extracted_topic}")
+                st.markdown(f"**Topic:** \"{strip_html(extracted_topic)}\"")
+            if domain:
+                st.caption(f"Domain Badge: {strip_html(domain)}")
+            if confidence > 0:
+                st.caption(f"Confidence Badge: {int(confidence * 100)}% Match")
             if fallback_query:
                 st.caption(f"Fallback query used: {fallback_query} · Papers searched: {papers_searched}")
 
@@ -1760,9 +1782,21 @@ elif st.session_state.mode == "researcher":
             cards_html += '</div>'
             st.markdown(cards_html, unsafe_allow_html=True)
         elif sim_data:
-            st.info("No strong semantic matches found for this topic.")
+            if render_elegant_empty_card(
+                "No similar papers found for this semantic query.",
+                icon="📚",
+                retry_key="retry_similar_papers",
+                retry_label="Retry Academic Analysis",
+            ):
+                st.rerun()
         else:
-            st.info("Click 'Run Full Academic Analysis' above to discover similar papers from Semantic Scholar and OpenAlex.")
+            if render_elegant_empty_card(
+                "Run full academic analysis to discover similar literature.",
+                icon="🧭",
+                retry_key="prompt_similar_papers",
+                retry_label="Run Analysis",
+            ):
+                st.rerun()
 
     # ── Tab 2: Quality Index ─────────────────────────────────
     with ai_tabs[1]:
@@ -1813,21 +1847,33 @@ elif st.session_state.mode == "researcher":
             
             trends = domain_trends.get("overall_trends", {})
             yearly = trends.get("yearly_counts", [])
-            keyword = domain_trends.get("keyword", trends.get("keyword", ""))
-            trend_label = trends.get("trend", "unknown")
+            keyword = trend_data.get("topic_title") or domain_trends.get("keyword", trends.get("keyword", ""))
+            trend_label = trends.get("trend", "stable")
             total = trends.get("total", 0)
+            domain = trend_data.get("domain", "")
+            confidence = float(trend_data.get("confidence", 0.0) or 0.0)
+            insufficient = bool(domain_trends.get("insufficient_data")) or int(total or 0) <= 0
 
             st.markdown(f"""
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-                <span style="font-size:16px;font-weight:600;color:#e2e8f0">Topic: {keyword}</span>
+                <span style="font-size:16px;font-weight:600;color:#e2e8f0">Topic: "{keyword}"</span>
                 <span style="background:rgba(52,211,153,0.15);color:#34d399;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600">{trend_label.title()}</span>
             </div>
-            <div style="color:#94a3b8;font-size:13px;margin-bottom:16px">Total publications in last 10 years: {total:,}</div>
+            <div style="color:#94a3b8;font-size:13px;margin-bottom:8px">Domain: {domain or "AI Research"} · Confidence: {int(confidence*100) if confidence else 0}% Match</div>
             """, unsafe_allow_html=True)
+
+            if insufficient:
+                st.warning("Insufficient academic trend data")
+                st.caption("We could not retrieve enough publication history for reliable trend plotting.")
+            else:
+                st.markdown(
+                    f"<div style='color:#94a3b8;font-size:13px;margin-bottom:16px'>Total publications in last 10 years: {int(total):,}</div>",
+                    unsafe_allow_html=True
+                )
 
             subdomains = domain_trends.get("subdomains", [])
             
-            if yearly or subdomains:
+            if (yearly or subdomains) and not insufficient:
                 # Prepare data for multi-line graph
                 plot_data = []
                 if yearly:
@@ -1921,9 +1967,21 @@ elif st.session_state.mode == "researcher":
                             </div>
                             """, unsafe_allow_html=True)
         elif trend_data:
-            st.info("Trend analysis unavailable.")
+            if render_elegant_empty_card(
+                "Insufficient academic trend data",
+                icon="📈",
+                retry_key="retry_trends",
+                retry_label="Retry Trend Analysis",
+            ):
+                st.rerun()
         else:
-            st.info("Click 'Run Full Academic Analysis' to see yearly publication trends and trending keywords.")
+            if render_elegant_empty_card(
+                "Run full academic analysis to view publication trends.",
+                icon="📊",
+                retry_key="prompt_trends",
+                retry_label="Run Analysis",
+            ):
+                st.rerun()
 
     # ── Tab 4: Suggestions ───────────────────────────────────
     with ai_tabs[3]:

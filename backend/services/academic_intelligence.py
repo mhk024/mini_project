@@ -22,7 +22,8 @@ import math
 import os
 from collections import Counter
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
+import json
 
 from groq import Groq
 
@@ -62,7 +63,11 @@ TOPIC_STOPWORDS = {
     "our", "its", "also", "such", "more", "most", "than", "over", "article", "authors",
 }
 MAX_QUERY_LENGTH = 120
-DEFAULT_FALLBACK_QUERY = "artificial intelligence machine learning"
+DEFAULT_FALLBACK_QUERY = "artificial intelligence and machine learning trends"
+GENERIC_QUERY_TERMS = {
+    "research", "study", "analysis", "method", "approach", "model",
+    "paper", "topic", "system", "data", "results", "overview",
+}
 
 _groq_client = None
 
@@ -99,6 +104,13 @@ def _is_invalid_generated_query(query: str) -> bool:
     words = re.findall(r"[a-zA-Z][a-zA-Z0-9\-]{1,}", cleaned.lower())
     if len(words) < 3:
         return True
+    if len(set(words)) < len(words):
+        return True
+    if all(w in GENERIC_QUERY_TERMS for w in words):
+        return True
+    ocr_noise_hits = sum(1 for w in words if re.search(r"[0-9]{3,}|[a-z]{1,2}[0-9]{2,}|[0-9]{2,}[a-z]{1,2}", w))
+    if ocr_noise_hits >= 2:
+        return True
     # Reject outputs that still look like raw PDF noise.
     bad_tokens = {
         "www", "http", "https", "issn", "volume", "issue", "department",
@@ -107,6 +119,175 @@ def _is_invalid_generated_query(query: str) -> bool:
     if sum(1 for w in words if w in bad_tokens) >= 2:
         return True
     return False
+
+
+def _extract_headings(document_text: str) -> list[str]:
+    headings: list[str] = []
+    lines = [l.strip() for l in (document_text or "").splitlines() if l.strip()]
+    for line in lines[:180]:
+        low = line.lower()
+        if len(line) < 4 or len(line) > 140:
+            continue
+        if re.match(r"^(references|bibliography|appendix)\b", low):
+            break
+        if re.match(r"^\d+(\.\d+)*\s+[A-Za-z]", line) or line.isupper():
+            headings.append(line)
+        elif re.match(r"^(introduction|methodology|methods|results|discussion|conclusion|related work)\b", low):
+            headings.append(line)
+    dedup = []
+    seen = set()
+    for h in headings:
+        key = h.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup.append(h)
+    return dedup[:12]
+
+
+def _extract_section_after_header(lines: list[str], header_regex: str, stop_regex: str, max_lines: int = 20) -> str:
+    header = re.compile(header_regex, re.IGNORECASE)
+    stopper = re.compile(stop_regex, re.IGNORECASE)
+    for i, line in enumerate(lines):
+        if header.search(line):
+            collected: list[str] = []
+            for j in range(i + 1, min(i + 1 + max_lines, len(lines))):
+                if stopper.match(lines[j].strip()):
+                    break
+                collected.append(lines[j].strip())
+            return re.sub(r"\s+", " ", " ".join(collected)).strip()
+    return ""
+
+
+def extract_document_structure(document_text: str) -> dict[str, Any]:
+    text = (document_text or "").strip()
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    title_candidates = _extract_title_candidates(text)
+    title = title_candidates[0] if title_candidates else (lines[0][:180] if lines else "")
+
+    abstract = _extract_section_after_header(
+        lines,
+        header_regex=r"^\s*abstract\b",
+        stop_regex=r"^\s*(keywords?|index terms?|introduction|1\.|i\.)\b",
+        max_lines=24,
+    )
+    first_page = " ".join(lines[:45])[:1600]
+    if not abstract:
+        abstract = first_page[:700]
+
+    introduction = _extract_section_after_header(
+        lines,
+        header_regex=r"^\s*(1\.?\s*)?introduction\b",
+        stop_regex=r"^\s*(2\.|ii\.|background|related work|methodology|methods)\b",
+        max_lines=26,
+    )
+    if not introduction:
+        introduction = _extract_first_meaningful_paragraph(text)[:700]
+
+    keywords: list[str] = []
+    for line in lines[:60]:
+        m = re.match(r"^\s*(keywords?|index terms?)\s*[:\-]\s*(.+)$", line, flags=re.IGNORECASE)
+        if m:
+            kws = re.split(r"[,;•·]", m.group(2))
+            keywords = [k.strip() for k in kws if len(k.strip()) > 2][:10]
+            break
+    if not keywords:
+        keywords = _extract_keywords(" ".join([title, abstract, introduction]), top_n=8)
+
+    return {
+        "title": title,
+        "abstract": abstract,
+        "introduction": introduction,
+        "keywords": keywords,
+        "headings": _extract_headings(text),
+        "first_page_content": first_page,
+    }
+
+
+def _fallback_topic_from_structure(structure: dict[str, Any], method: str = "title") -> dict[str, Any]:
+    title = (structure.get("title") or "").strip()
+    abstract = (structure.get("abstract") or "").strip()
+    intro = (structure.get("introduction") or "").strip()
+    key_terms = _top_keywords_from_texts([title, abstract, intro], top_n=6)
+
+    if method == "title" and title:
+        query = clean_search_query(title, max_chars=90)
+    elif method == "abstract" and abstract:
+        query = clean_search_query(" ".join(_top_keywords_from_texts([abstract], top_n=8)), max_chars=90)
+    else:
+        query = clean_search_query(" ".join(key_terms[:8]), max_chars=90)
+
+    if _is_invalid_generated_query(query):
+        query = DEFAULT_FALLBACK_QUERY
+
+    title_guess = _clean_topic_phrase(title, max_words=12) or "Academic Research Topic"
+    return {
+        "main_topic": title_guess,
+        "concise_title": title_guess,
+        "search_query": query,
+        "domain": "AI Research" if "ai" in query.lower() or "artificial intelligence" in query.lower() else "Computer Science",
+        "subdomain": "Machine Learning" if "learning" in query.lower() else "General",
+        "confidence": 0.55,
+        "fallback_method": method,
+    }
+
+
+def _synthesize_topic_with_llm(structure: dict[str, Any]) -> dict[str, Any] | None:
+    client = _get_groq_client()
+    if not client:
+        return None
+    prompt = f"""
+You are an academic research analyst.
+
+Given this research paper content:
+- Title: {structure.get("title", "")}
+- Abstract: {structure.get("abstract", "")[:1200]}
+- Introduction: {structure.get("introduction", "")[:1200]}
+- Keywords: {", ".join(structure.get("keywords", [])[:10])}
+- Headings: {", ".join(structure.get("headings", [])[:10])}
+
+1. Identify the main research topic
+2. Generate a concise academic title
+3. Generate a Semantic Scholar search query
+4. Identify the research domain
+5. Return only JSON
+
+Rules:
+- concise
+- professional
+- academic wording
+- max 10 words for search query
+- avoid generic keywords
+
+Return JSON with keys:
+main_topic, concise_title, search_query, domain, subdomain, confidence
+"""
+    try:
+        res = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+        )
+        raw = (res.choices[0].message.content or "").strip()
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not m:
+            return None
+        data = json.loads(m.group())
+        if not isinstance(data, dict):
+            return None
+        data["search_query"] = _clean_generated_query(str(data.get("search_query", "")))
+        data["main_topic"] = _clean_topic_phrase(str(data.get("main_topic", "")), max_words=14)
+        data["concise_title"] = _clean_topic_phrase(str(data.get("concise_title", data.get("main_topic", ""))), max_words=14)
+        data["domain"] = _clean_topic_phrase(str(data.get("domain", "")), max_words=5)
+        data["subdomain"] = _clean_topic_phrase(str(data.get("subdomain", "")), max_words=6)
+        try:
+            data["confidence"] = round(float(data.get("confidence", 0.0)), 2)
+        except Exception:
+            data["confidence"] = 0.0
+        return data
+    except Exception:
+        logger.exception("[TOPIC SYNTHESIS] LLM synthesis failed")
+        return None
 
 
 def _clean_generated_query(query: str) -> str:
@@ -130,6 +311,14 @@ def _get_groq_client() -> Optional[Groq]:
 
 
 def generate_search_query(text: str) -> str:
+    structure = extract_document_structure(text or "")
+    synthesized = _synthesize_topic_with_llm(structure)
+    if synthesized:
+        query = _clean_generated_query(synthesized.get("search_query", ""))
+        if not _is_invalid_generated_query(query):
+            logger.info("[GENERATED SEARCH QUERY] %s", query)
+            return query
+
     prompt = f"""
 You are an academic research assistant.
 
@@ -559,49 +748,48 @@ def _compress_query(query: str, max_chars: int = MAX_QUERY_LENGTH) -> str:
 
 
 def extract_research_topic(document_text: str) -> dict:
-    cleaned_text = _clean_document_for_topic_extraction(document_text)
-    metadata = extract_paper_metadata(cleaned_text or document_text)
-    raw_title = (metadata.get("title") or "").strip()
-    abstract = (metadata.get("abstract") or "").strip()
-    first_para = _extract_first_meaningful_paragraph(cleaned_text or document_text)
-    fallback_blob = " ".join([abstract, first_para, (cleaned_text or document_text)[:1000]]).strip()
+    structure = extract_document_structure(document_text)
+    logger.info("[TOPIC DEBUG] extracted title=%s", structure.get("title", ""))
+    logger.info("[TOPIC DEBUG] headings=%s", structure.get("headings", [])[:5])
 
-    # Debug logging required by query-stabilization patch
-    logger.info("[RAW TITLE] %s", raw_title)
+    synthesized = _synthesize_topic_with_llm(structure)
+    fallback_method = "none"
+    if not synthesized or _is_invalid_generated_query(synthesized.get("search_query", "")):
+        if structure.get("title"):
+            synthesized = _fallback_topic_from_structure(structure, method="title")
+            fallback_method = "title"
+        elif structure.get("abstract"):
+            synthesized = _fallback_topic_from_structure(structure, method="abstract")
+            fallback_method = "abstract"
+        else:
+            synthesized = _fallback_topic_from_structure(structure, method="tfidf")
+            fallback_method = "tfidf"
 
-    probable_title = ""
-    for candidate in _extract_title_candidates(cleaned_text or document_text) + [raw_title]:
-        candidate = re.sub(r"^\s*abstract\s*[:\-]?\s*", "", candidate or "", flags=re.IGNORECASE)
-        # aggressively clean noisy scraped headers before checking weakness
-        candidate = clean_research_query(candidate, fallback_text="", min_words=3, max_words=12) or candidate
-        clean = _clean_topic_phrase(candidate, max_words=14)
-        if clean and not _is_weak_topic(clean):
-            probable_title = clean
-            break
-    if not probable_title:
-        probable_title = _clean_topic_phrase(raw_title, max_words=12) or "Research topic"
+    semantic_query = _clean_generated_query(synthesized.get("search_query", ""))
+    if _is_invalid_generated_query(semantic_query):
+        synthesized = _fallback_topic_from_structure(structure, method="tfidf")
+        semantic_query = synthesized.get("search_query", DEFAULT_FALLBACK_QUERY)
+        fallback_method = "tfidf"
 
-    keywords = _extract_keywords(" ".join([probable_title, abstract, first_para]), top_n=8)
+    topic_title = synthesized.get("concise_title") or synthesized.get("main_topic") or structure.get("title") or "Academic Research Topic"
+    keywords = structure.get("keywords", [])[:8]
     if not keywords:
-        keywords = _top_keywords_from_texts([probable_title, abstract, first_para], top_n=6)
+        keywords = _top_keywords_from_texts([structure.get("title", ""), structure.get("abstract", ""), structure.get("introduction", "")], top_n=8)
 
-    llm_input = " ".join([cleaned_text[:3000], abstract[:1000], first_para[:800], raw_title, probable_title]).strip()
-    semantic_query = generate_search_query(llm_input)
-    cleaned_query_dbg = semantic_query
-    if _is_invalid_generated_query(semantic_query):
-        semantic_query = clean_research_query(raw_title or probable_title, fallback_text=fallback_blob, min_words=5, max_words=12)
-    semantic_query = _clean_generated_query(semantic_query)
-    if _is_invalid_generated_query(semantic_query):
-        semantic_query = DEFAULT_FALLBACK_QUERY
-
-    logger.info("[CLEANED QUERY] %s", cleaned_query_dbg or semantic_query)
-    logger.info("[API SEARCH QUERY] %s", semantic_query)
+    logger.info("[TOPIC DEBUG] generated query=%s", semantic_query)
+    logger.info("[TOPIC DEBUG] fallback method=%s", fallback_method)
 
     return {
-        "title": probable_title,
-        "keywords": keywords[:8],
+        "title": _clean_topic_phrase(topic_title, max_words=14),
+        "keywords": keywords,
         "semantic_query": semantic_query,
-        "abstract_preview": (abstract or first_para or cleaned_text[:500]).strip()[:500],
+        "domain": synthesized.get("domain", "Computer Science"),
+        "subdomain": synthesized.get("subdomain", "General"),
+        "main_topic": synthesized.get("main_topic", topic_title),
+        "confidence": float(synthesized.get("confidence", 0.0) or 0.0),
+        "fallback_method": fallback_method if fallback_method != "none" else synthesized.get("fallback_method", "none"),
+        "document_structure": structure,
+        "abstract_preview": (structure.get("abstract") or structure.get("introduction") or structure.get("first_page_content", "")[:500]).strip()[:500],
     }
 
 
@@ -671,8 +859,8 @@ def _build_multi_strategy_queries(topic_data: dict) -> list[str]:
         semantic_q = DEFAULT_FALLBACK_QUERY
     # Keep all strategies anchored to the cleaned semantic query.
     shorter = " ".join(semantic_q.split()[:6]).strip()
-    core_terms = " ".join(semantic_q.split()[:4]).strip()
-    queries = [semantic_q, shorter, core_terms]
+    domain_only = clean_search_query(topic_data.get("domain", ""), max_chars=80)
+    queries = [semantic_q, shorter, domain_only]
     ordered = []
     seen = set()
     for q in queries:
@@ -1145,7 +1333,7 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
         trend_status = "UNKNOWN"
 
     if not merged_papers:
-        fallback_msg = "Limited academic comparison data available"
+        fallback_msg = "Insufficient academic trend data"
         trend_data = {
             "keyword": topic_data.get("semantic_query", topic),
             "warning_message": fallback_msg,
@@ -1154,12 +1342,13 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
             "publication_count": total_pubs,
             "render": total_pubs > 0,
             "topic_status": trend_status,
+            "insufficient_data": True,
         }
         suggestions = [{
             "category": "Academic Matching",
             "priority": "Medium",
             "suggestion": fallback_msg,
-            "details": "External scholarly APIs returned no strong matches for this topic."
+            "details": "External scholarly APIs returned no strong matches for this semantic query."
         }]
     else:
         trend_data = {
@@ -1175,9 +1364,10 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
             "publication_count": total_pubs,
             "render": total_pubs > 0,
             "topic_status": trend_status,
+            "insufficient_data": total_pubs <= 0,
         }
         if total_pubs == 0:
-            trend_data["warning_message"] = "Not enough academic data available for trend analysis."
+            trend_data["warning_message"] = "Insufficient academic trend data"
 
         suggestions = generate_research_suggestions(
             metadata,
@@ -1233,6 +1423,10 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
         "extracted_topic":    topic_data.get("semantic_query", topic),
         "topic_extraction":   topic_data,
         "fallback_query_used": used_ss_query or used_oa_query or clean_search_query(topic),
+        "domain": topic_data.get("domain", "Computer Science"),
+        "subdomain": topic_data.get("subdomain", "General"),
+        "confidence": topic_data.get("confidence", 0.0),
+        "fallback_method": topic_data.get("fallback_method", "none"),
         "papers_searched":    len(merged_papers),
         "success":            True,
         "analysis_time_s":    elapsed,
@@ -1240,5 +1434,7 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
     }
 
     logger.info("[RESEARCH] Analysis completed successfully")
+    logger.info("[TOPIC DEBUG] API response count=%d", len(merged_papers))
+    logger.info("[TOPIC DEBUG] fallback method used=%s", topic_data.get("fallback_method", "none"))
     await cache_manager.set(doc_hash, final, category="academic_analysis")
     return final

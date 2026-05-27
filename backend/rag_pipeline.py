@@ -78,10 +78,21 @@ def create_or_load_db(file_path: str):
     docs = _deduplicate_chunks(docs)
 
     os.makedirs(persist_dir, exist_ok=True)
-    # Convert Document objects to raw text strings for Chroma.from_texts
+    # Preserve source metadata so downstream analysis can recover page order.
     texts = [doc.page_content for doc in docs]
+    metadatas = []
+    ids = []
+    file_key = os.path.basename(file_path)
+    for idx, doc in enumerate(docs):
+        md = dict(doc.metadata or {})
+        md["chunk_index"] = idx
+        md["source_file"] = file_key
+        metadatas.append(md)
+        ids.append(f"{collection}_{idx}")
     db = Chroma.from_texts(
         texts=texts,
+        metadatas=metadatas,
+        ids=ids,
         embedding=embed_model,
         collection_name=collection,
         persist_directory=persist_dir,

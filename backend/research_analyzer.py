@@ -505,8 +505,21 @@ def normalize_eval_result(result: Dict[str, Any]) -> Dict[str, Any]:
 def get_document_text(db, max_chars: int = 5000) -> str:
     try:
         collection = db._collection
-        result     = collection.get(include=["documents"])
-        docs       = result.get("documents", [])
-        return "\n\n".join(docs)[:max_chars]
+        result = collection.get(include=["documents", "metadatas"])
+        docs = result.get("documents", []) or []
+        metadatas = result.get("metadatas", []) or []
+        if metadatas and len(metadatas) == len(docs):
+            indexed = list(enumerate(zip(docs, metadatas)))
+            indexed.sort(
+                key=lambda x: (
+                    int((x[1][1] or {}).get("page", 0) or 0),
+                    int((x[1][1] or {}).get("chunk_index", x[0]) or x[0]),
+                    x[0],
+                )
+            )
+            ordered_docs = [item[1][0] for item in indexed]
+        else:
+            ordered_docs = docs
+        return "\n\n".join(ordered_docs)[:max_chars]
     except Exception:
         return ""

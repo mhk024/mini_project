@@ -251,23 +251,29 @@ def save_json_file(file_path: str, data: dict):
         logger.error(f"Error saving to {file_path}: {e}")
 
 async def _get_active_document_text() -> str:
-    # 1. Try to read active document text from loaded vector db context
-    if state.vector_db is not None:
-        from research_analyzer import get_document_text
-        text = await asyncio.to_thread(get_document_text, state.vector_db)
-        if text:
-            return text
-            
-    # 2. Try to fall back to the most recently loaded context
+    # 1. Prefer raw source file text for better section ordering.
     if state.loaded_contexts:
         last_filename = list(state.loaded_contexts.keys())[-1]
-        ctx = state.loaded_contexts[last_filename]
+        file_path = os.path.join(DATASET_DIR, last_filename)
+        if os.path.exists(file_path):
+            if last_filename.endswith(".pdf"):
+                from langchain_community.document_loaders import PyPDFLoader
+                docs = await asyncio.to_thread(PyPDFLoader(file_path).load)
+                raw_text = "\n\n".join(d.page_content for d in docs)[:20000]
+            else:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    raw_text = f.read()[:20000]
+            if raw_text and raw_text.strip():
+                return raw_text
+
+    # 2. Fallback to active vector db context.
+    if state.vector_db is not None:
         from research_analyzer import get_document_text
-        text = await asyncio.to_thread(get_document_text, ctx["db"])
+        text = await asyncio.to_thread(get_document_text, state.vector_db, 12000)
         if text:
             return text
-            
-    # 3. Try to fall back to the most recently uploaded file in DATASET_DIR
+
+    # 3. Fall back to most recently uploaded file in DATASET_DIR
     if os.path.exists(DATASET_DIR):
         files = [
             f for f in os.listdir(DATASET_DIR)
@@ -276,11 +282,16 @@ async def _get_active_document_text() -> str:
         if files:
             files.sort(key=lambda x: os.path.getmtime(os.path.join(DATASET_DIR, x)), reverse=True)
             last_file = files[0]
-            await _load_context_async(last_file)
-            from research_analyzer import get_document_text
-            text = await asyncio.to_thread(get_document_text, state.vector_db)
-            if text:
-                return text
+            file_path = os.path.join(DATASET_DIR, last_file)
+            if last_file.endswith(".pdf"):
+                from langchain_community.document_loaders import PyPDFLoader
+                docs = await asyncio.to_thread(PyPDFLoader(file_path).load)
+                raw_text = "\n\n".join(d.page_content for d in docs)[:20000]
+            else:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    raw_text = f.read()[:20000]
+            if raw_text and raw_text.strip():
+                return raw_text
                 
     raise HTTPException(status_code=400, detail="No active document found. Please upload/load a document first.")
 
@@ -611,7 +622,16 @@ async def analyze_paper_endpoint(request: AnalyzePaperRequest):
         await _load_context_async(filename)
         from research_analyzer import run_full_pipeline, get_document_text
 
-        text = await asyncio.to_thread(get_document_text, state.vector_db)
+        file_path = os.path.join(DATASET_DIR, filename)
+        if filename.endswith(".pdf") and os.path.exists(file_path):
+            from langchain_community.document_loaders import PyPDFLoader
+            docs = await asyncio.to_thread(PyPDFLoader(file_path).load)
+            text = "\n\n".join(d.page_content for d in docs)[:20000]
+        elif os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                text = f.read()[:20000]
+        else:
+            text = await asyncio.to_thread(get_document_text, state.vector_db, 12000)
         if not text:
             return {"status": "error", "message": "Could not extract text"}
 

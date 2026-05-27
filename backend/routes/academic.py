@@ -48,32 +48,31 @@ class PerQuestionEvaluationRequest(BaseModel):
 # 🔧  SHARED HELPER
 # ─────────────────────────────────────────────
 async def _get_document_text_async(filename: Optional[str] = None) -> str:
-    try:
-        from research_analyzer import get_document_text
-        import state
-
-        if state.vector_db is not None:
-            text = await asyncio.to_thread(get_document_text, state.vector_db, max_chars=5000)
-            if text:
-                return text
-    except Exception:
-        pass
-
     if not filename:
+        # Last-resort fallback to currently loaded vector DB context.
+        try:
+            from research_analyzer import get_document_text
+            import state
+            if state.vector_db is not None:
+                text = await asyncio.to_thread(get_document_text, state.vector_db, max_chars=12000)
+                if text:
+                    return text
+        except Exception:
+            pass
         raise HTTPException(400, "No document loaded.")
 
     file_path = os.path.join(DATASET_DIR, filename)
     if not os.path.exists(file_path):
         raise HTTPException(404, f"File {filename} not found.")
 
-    # Async read
+    # Always prioritize raw file extraction for structural fidelity.
     if filename.endswith(".pdf"):
         from langchain_community.document_loaders import PyPDFLoader
         docs = await asyncio.to_thread(PyPDFLoader(file_path).load)
-        return "\n\n".join(d.page_content for d in docs)[:5000]
+        return "\n\n".join(d.page_content for d in docs)[:20000]
     else:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            return f.read()[:5000]
+            return f.read()[:20000]
 
 # ─────────────────────────────────────────────
 # 🔍  ENDPOINTS
