@@ -25,8 +25,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from services.cache_manager import cache_manager
-from routes.academic import router as academic_router
 from services.resource_manager import get_llm, release_heavy_models
+from routes.academic import router as academic_router
+from rag_pipeline import create_or_load_db
 from . import state
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -135,6 +136,7 @@ class QuestionRequest(BaseModel):
     username: str
     question: str
     filename: str | None = None
+    file_id: str | None = None
     mode: str = "student"
     session_id: str | None = None
 
@@ -155,11 +157,14 @@ class SetFileRequest(BaseModel):
 
 
 import json
+import uuid
+from utils import status as file_status
 
 
 USERS_FILE = "users.json"
 HISTORY_FILE = "history.json"
 APP_STATE_FILE = "app_state.json"
+
 
 def load_json_file(file_path: str, default: dict) -> dict:
     if not os.path.exists(file_path):
@@ -255,17 +260,77 @@ async def health():
         },
     }
 
+@app.get("/files/status/{file_id}")
+async def get_file_status(file_id: str):
+    return file_status.get_status(file_id)
+
 @app.post("/ask")
 async def ask(request: QuestionRequest):
     logger.info("Entry /ask: %s", request)
     start_time = time.time()
     answer_text = ""
     try:
-        if request.filename:
+        # Determine which identifier to use for document loading
+        file_identifier = request.file_id or request.filename
+        if not file_identifier:
+            raise HTTPException(status_code=400, detail="No file identifier provided")
+
+        if request.file_id:
+            # Ensure the document is indexed before answering
+            status = file_status.get_status(request.file_id)
+            if not status.get("indexed"):
+                # Trigger background indexing if not already started
+                if not status.get("processing"):
+                    file_status.set_status(request.file_id, {"processing": True})
+                    # Build full path for the uploaded file
+                    filename = status.get("filename")
+                    if not filename:
+                        raise HTTPException(status_code=400, detail="Filename not found for file_id")
+                    file_path = os.path.join(DATASET_DIR, filename)
+                    asyncio.create_task(index_file(request.file_id, file_path))
+                raise HTTPException(status_code=503, detail="Document is being processed")
+            # Load context using the original filename stored in status
+            await _load_context_async(status.get("filename"))
+        else:
+            # Fallback to legacy filename handling
             await _load_context_async(request.filename)
+
+# -------------------------------------------------------------------
+# Indexing routine for lazy processing of uploaded documents
+# -------------------------------------------------------------------
+async def index_file(file_id: str, file_path: str):
+    """Create Chroma index for the given file_path and update status.
+
+    This runs in a background task triggered by the first query on an
+    uploaded document. It respects the MAX_CHUNKS, CHUNK_SIZE and
+    CHUNK_OVERLAP settings defined in config.py and uses the lazy
+    embedding model loader from services.resource_manager.
+    """
+    try:
+        # Create or load the vector DB – heavy work off the event loop
+        await asyncio.to_thread(create_or_load_db, file_path)
+        # Update status to reflect successful indexing
+        file_status.set_status(file_id, {
+            "uploaded": True,
+            "processing": False,
+            "indexed": True,
+            "error": None,
+            "filename": os.path.basename(file_path),
+        })
+        logger.info("Indexing completed for %s", file_path)
+    except Exception as e:
+        logger.exception("Indexing failed for %s", file_path)
+        # Record failure without overwriting uploaded flag
+        file_status.set_status(file_id, {
+            "processing": False,
+            "indexed": False,
+            "error": str(e),
+        })
+
         if not state.qa_chain:
             raise HTTPException(status_code=503, detail="Context not loaded")
-        ckey = f"ask:{request.filename}:{request.question}:{request.mode}"
+
+        ckey = f"ask:{file_identifier}:{request.question}:{request.mode}"
         cached = await cache_manager.get(ckey, category="rag_chat")
         
         if cached:
@@ -560,10 +625,21 @@ async def upload_file(file: UploadFile = File(...)):
         with open(file_path, "wb") as f:
             f.write(content)
 
+        # Generate a UUID for this upload and initialise status record
+        file_id = str(uuid.uuid4())
+        file_status.set_status(file_id, {
+            "uploaded": True,
+            "processing": False,
+            "indexed": False,
+            "error": None,
+            "filename": file.filename,
+        })
+
+        # Optional eager preload (kept for backward compatibility)
         if os.getenv("PRELOAD_ON_UPLOAD", "false").lower() in ("1", "true", "yes"):
             await _load_context_async(file.filename)
 
-        return {"message": "Success", "filename": file.filename}
+        return {"message": "Success", "filename": file.filename, "file_id": file_id}
     except Exception as e:
         logger.error("Upload error: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -580,6 +656,11 @@ async def list_files():
         if os.path.isfile(os.path.join(dataset_path, f))
     ]
     return {"files": files}
+
+# New endpoint to retrieve processing status for a specific upload
+@app.get("/files/status/{file_id}")
+async def get_file_status(file_id: str):
+    return file_status.get_status(file_id)
 
 
 @app.get("/history/{username}")

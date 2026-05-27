@@ -13,16 +13,10 @@ import math
 from typing import List, Dict, Any
 
 from langchain_core.prompts import PromptTemplate
-from services.resource_manager import (
-    get_embeddings,
-    get_llm,
-    release_heavy_models,
-    CHROMA_PERSIST_DIR,
-    GROQ_MODEL,
-    GROQ_API_KEY,
-)
+
 from services.cache_manager import cache_manager
-from config import DUPLICATE_JACCARD_THRESHOLD, RETRIEVAL_RAW_K, RETRIEVAL_KEEP_K
+from services.resource_manager import get_llm, get_embedding_model, get_embeddings
+from config import DUPLICATE_JACCARD_THRESHOLD, RETRIEVAL_RAW_K, RETRIEVAL_KEEP_K, CHROMA_PERSIST_DIR, GROQ_API_KEY, GROQ_MODEL
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 logger = logging.getLogger(__name__)
@@ -59,7 +53,9 @@ def create_or_load_db(file_path: str):
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     from langchain_community.vectorstores import Chroma
 
-    embeddings = get_embeddings()
+    # Lazy load embedding model
+    embed_model = get_embedding_model()
+
     collection = _collection_name(file_path)
     persist_dir = os.path.join(CHROMA_PERSIST_DIR, collection)
 
@@ -67,20 +63,26 @@ def create_or_load_db(file_path: str):
         logger.info("Loading existing Chroma collection at %s", persist_dir)
         return Chroma(
             collection_name=collection,
-            embedding_function=embeddings,
+            embedding_function=embed_model,
             persist_directory=persist_dir,
         )
 
     logger.info("Building new Chroma index for %s", file_path)
     documents = load_document(file_path)
-    splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=80)
+    from config import CHUNK_SIZE, CHUNK_OVERLAP, MAX_CHUNKS
+    splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
     docs = splitter.split_documents(documents)
+    # Enforce max chunks limit
+    if len(docs) > MAX_CHUNKS:
+        docs = docs[:MAX_CHUNKS]
     docs = _deduplicate_chunks(docs)
 
     os.makedirs(persist_dir, exist_ok=True)
-    db = Chroma.from_documents(
-        docs,
-        embeddings,
+    # Convert Document objects to raw text strings for Chroma.from_texts
+    texts = [doc.page_content for doc in docs]
+    db = Chroma.from_texts(
+        texts=texts,
+        embedding=embed_model,
         collection_name=collection,
         persist_directory=persist_dir,
     )

@@ -856,6 +856,44 @@ with st.sidebar:
                 r  = requests.post(UPLOAD_URL, files=fp, timeout=300)
                 if r.status_code == 200:
                     status.update(label="Done!", state="complete", expanded=False)
+                    # Store file_id and start polling for processing/indexing status
+                    resp_json = r.json()
+                    file_id = resp_json.get("file_id")
+                    if file_id:
+                        st.session_state.file_id = file_id
+                        # Display status steps container
+                        status_container = st.empty()
+                        while True:
+                            try:
+                                st_req = requests.get(f"{BASE}/files/status/{file_id}", timeout=10)
+                                if st_req.status_code != 200:
+                                    raise Exception(f"Status endpoint error {st_req.status_code}")
+                                st_data = st_req.json()
+                                uploaded = st_data.get("uploaded", False)
+                                processing = st_data.get("processing", False)
+                                indexed = st_data.get("indexed", False)
+                                error_msg = st_data.get("error")
+                                # Build HTML for steps
+                                steps_html = ""
+                                # Uploaded step
+                                steps_html += f"<div class=\"status-step {'done' if uploaded else 'active' if not uploaded else 'pending'}\">📤 Uploaded</div>"
+                                # Processing step
+                                steps_html += f"<div class=\"status-step {'done' if not processing and uploaded else 'active' if processing else 'pending'}\">⚙️ Processing</div>"
+                                # Indexed step
+                                steps_html += f"<div class=\"status-step {'done' if indexed else 'active' if (processing or uploaded) else 'pending'}\">🔎 Indexed</div>"
+                                if error_msg:
+                                    steps_html += f"<div class=\"status-step" style=\"color:#f87171\">❌ Error: {error_msg}</div>"
+                                status_container.markdown(f"""
+                                    <div class='ai-card' style='padding:12px'>
+                                        {steps_html}
+                                    </div>
+                                """, unsafe_allow_html=True)
+                                if indexed or error_msg:
+                                    break
+                                time.sleep(2)
+                            except Exception as e:
+                                st.error(f"Failed to get status: {e}")
+                                break
                     st.session_state.loaded_file = ufile.name
                     st.toast(f"'{ufile.name}' uploaded!", icon="🚀")
                     st.balloons(); time.sleep(1); st.rerun()
@@ -994,6 +1032,7 @@ if st.session_state.mode == "student":
                         "filename":   st.session_state.loaded_file,
                         "session_id": st.session_state.session_id,
                         "mode":       "student",
+                        "file_id":    st.session_state.get("file_id")
                     }, timeout=300)
 
                     if r.status_code == 200:
