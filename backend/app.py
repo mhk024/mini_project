@@ -7,8 +7,9 @@ from __future__ import annotations
 import os
 import sys
 import time
+import gc
 import logging
-import psutil
+# import psutil  # Removed to eliminate external dependency
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 load_dotenv()
@@ -53,11 +54,13 @@ def _evict_contexts_if_needed():
 
 async def _load_context_async(filename: str):
     """Load vector DB + RAG chain on demand (thread pool for CPU/IO heavy work)."""
+    load_start = time.time()
     if filename in state.loaded_contexts:
         ctx = state.loaded_contexts[filename]
         state.loaded_contexts.move_to_end(filename)
         state.vector_db = ctx["db"]
         state.qa_chain = ctx["qa"]
+        logger.info(f"Context {filename} loaded from cache in {(time.time() - load_start)*1000:.2f} ms")
         return
 
     file_path = os.path.join(DATASET_DIR, filename)
@@ -84,7 +87,17 @@ async def _load_context_async(filename: str):
         _evict_contexts_if_needed()
         state.vector_db = db
         state.qa_chain = qa
-        logger.info(f"Memory usage after loading context: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+        # Log loading time and perform garbage collection
+        load_elapsed = (time.time() - load_start) * 1000
+        logger.info(f"Loaded context {filename} in {load_elapsed:.2f} ms")
+        gc.collect()
+        # Optional memory usage logging on Linux
+        try:
+            import resource
+            mem_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            logger.info(f"Memory usage after loading: {mem_kb/1024:.2f} MB")
+        except Exception:
+            pass
 
 
 @asynccontextmanager
