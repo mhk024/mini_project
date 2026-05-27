@@ -70,7 +70,7 @@ def create_or_load_db(file_path: str):
 
     logger.info("Building new Chroma index for %s", file_path)
     documents = load_document(file_path)
-    splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=120)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=80)
     docs = splitter.split_documents(documents)
     docs = _deduplicate_chunks(docs)
 
