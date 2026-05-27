@@ -11,7 +11,7 @@ import asyncio
 import logging
 from typing import Callable, Any
 
-import numpy as np
+import math
 from langchain_core.prompts import PromptTemplate
 
 from services.resource_manager import get_embeddings
@@ -57,9 +57,11 @@ JSON response:"""
 )
 
 
-def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    denom = (np.linalg.norm(a) * np.linalg.norm(b)) or 1.0
-    return float(np.dot(a, b) / denom)
+def _cosine_similarity(a, b) -> float:
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    denom = (norm_a * norm_b) or 1.0
+    return float(sum(x * y for x, y in zip(a, b)) / denom)
 
 
 def get_dataset_info(db, uploaded_files: list) -> dict:
@@ -168,7 +170,7 @@ async def run_full_evaluation(
 
         try:
             embs = await asyncio.to_thread(emb_model.embed_documents, [ref_ans, mod_ans])
-            score = round(_cosine_similarity(np.array(embs[0]), np.array(embs[1])), 4)
+            score = round(_cosine_similarity(embs[0], embs[1]), 4)
         except Exception:
             score = 0.0
 
@@ -188,7 +190,7 @@ async def run_full_evaluation(
     scores = [r["similarity"] for r in results]
     metrics = compute_metrics(scores, threshold=0.45)
     metrics["total_time_s"] = round(time.time() - start_time, 2)
-    metrics["avg_similarity"] = round(float(np.mean(scores)), 4) if scores else 0.0
+    metrics["avg_similarity"] = round(float(sum(scores) / len(scores)), 4) if scores else 0.0
 
     final_result = {
         "dataset_info": dataset_info,

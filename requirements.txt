@@ -29,10 +29,10 @@ fastembed>=0.3.0
 pypdf>=4.0.0
 
 # ML / NLP
-numpy>=1.26.0,<2.0.0
-transformers==4.41.2
-tokenizers==0.19.1
-sentence-transformers==2.7.0
+# numpy> =1.26.0,<2.0.0  # Commented out for memory optimization
+# transformers==4.41.2  # Commented out for memory optimization
+# tokenizers==0.19.1  # Commented out for memory optimization
+# sentence-transformers==2.7.0  # Commented out for memory optimization
 
 # Frontend
 streamlit>=1.32.0

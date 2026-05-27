@@ -8,7 +8,8 @@ import os
 import hashlib
 import asyncio
 import logging
-import numpy as np
+# import numpy as np  # Removed for memory optimization
+import math
 from typing import List, Dict, Any
 
 from langchain_core.prompts import PromptTemplate
@@ -112,16 +113,17 @@ def _deduplicate_chunks(chunks: List[Any]) -> List[Any]:
 
 def _rerank_with_embeddings(query: str, documents: List[Any]) -> List[Dict[str, Any]]:
     embeddings = get_embeddings()
-    texts = [d.page_content for d in documents]
-    vectors = embeddings.embed_documents([query] + texts)
-    q_vec = np.array(vectors[0])
     scored = []
-    for doc, doc_vec, text in zip(documents, vectors[1:], texts):
-        d_vec = np.array(doc_vec)
-        denom = (np.linalg.norm(q_vec) * np.linalg.norm(d_vec)) or 1.0
-        score = float(np.dot(q_vec, d_vec) / denom)
+    for doc in documents:        # Compute similarity using pure python
+        a = embeddings.embed_query(query)
+        b = embeddings.embed_query(doc.page_content)
+        dot = sum(x*y for x, y in zip(a, b))
+        norm_a = math.sqrt(sum(x*x for x in a))
+        norm_b = math.sqrt(sum(y*y for y in b))
+        denom = (norm_a * norm_b) or 1.0
+        score = float(dot / denom)
         scored.append({
-            "content": text,
+            "content": doc.page_content,
             "score": score,
             "source": os.path.basename(doc.metadata.get("source", "unknown")),
         })

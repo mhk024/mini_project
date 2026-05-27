@@ -8,6 +8,8 @@ import os
 import sys
 import time
 import logging
+import psutil
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -23,7 +25,7 @@ from pydantic import BaseModel
 
 from services.cache_manager import cache_manager
 from routes.academic import router as academic_router
-from services.resource_manager import get_llm
+from services.resource_manager import get_llm, release_heavy_models
 import state
 
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -82,6 +84,7 @@ async def _load_context_async(filename: str):
         _evict_contexts_if_needed()
         state.vector_db = db
         state.qa_chain = qa
+        logger.info(f"Memory usage after loading context: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
 
 
 @asynccontextmanager
@@ -92,9 +95,20 @@ async def lifespan(app: FastAPI):
             logger.info("Route: %s methods: %s", route.path, route.methods)
     yield
     logger.info("Research Assistant API shutting down")
+        # Release heavy models to free memory on shutdown
+        release_heavy_models()
 
 
 app = FastAPI(lifespan=lifespan)
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request, exc):
+    logger.error("Unhandled exception: %s", exc, exc_info=True)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
