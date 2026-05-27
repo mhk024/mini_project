@@ -882,7 +882,7 @@ with st.sidebar:
                                 # Indexed step
                                 steps_html += f"<div class=\"status-step {'done' if indexed else 'active' if (processing or uploaded) else 'pending'}\">🔎 Indexed</div>"
                                 if error_msg:
-                                    steps_html += f"<div class=\"status-step" style=\"color:#f87171\">❌ Error: {error_msg}</div>"
+                                    steps_html += f'<div class="status-step" style="color:#f87171">❌ Error: {error_msg}</div>'
                                 status_container.markdown(f"""
                                     <div class='ai-card' style='padding:12px'>
                                         {steps_html}
