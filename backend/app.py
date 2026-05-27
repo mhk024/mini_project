@@ -268,14 +268,30 @@ async def ask(request: QuestionRequest):
         cached = await cache_manager.get(ckey, category="rag_chat")
         
         if cached:
-            cached["cache_hit"] = True
             result = cached
         else:
-            result = await state.qa_chain(request.question, mode=request.mode)
-            result["execution_time_ms"] = round((time.time() - start_time) * 1000, 2)
-            result["cache_hit"] = False
-            await cache_manager.set(ckey, result, category="rag_chat")
+            answer = await asyncio.to_thread(state.qa_chain.invoke, {"question": request.question})
+            answer_text = answer.get("answer", "")
             
+            # Extract key points and summary
+            sentences = [s.strip() for s in answer_text.replace("\n", " ").split('. ') if s]
+            key_points = sentences[:5]
+            
+            # Build initial result structure
+            result = {
+                "answer": answer_text,
+                "key_points": key_points,
+                "summary": {
+                    "short": (sentences[0] + ".") if sentences else "",
+                    "detailed": answer_text
+                },
+                "execution_time_ms": round((time.time() - start_time) * 1000, 2)
+            }
+            await cache_manager.set(ckey, result, category="rag_chat")
+
+logger.info("Result /ask: %s", result)
+        
+
         # Update metrics in app_state.json
         if request.username:
             app_state = load_json_file(APP_STATE_FILE, {"users": {}})
@@ -328,7 +344,9 @@ async def ask(request: QuestionRequest):
             })
             save_json_file(HISTORY_FILE, history)
             
-        logger.info("Result /ask: %s", result)
+        # Ensure answer key exists
+        result.setdefault('answer', answer_text)
+
         return result
     except HTTPException:
         raise
