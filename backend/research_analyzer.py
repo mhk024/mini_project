@@ -168,15 +168,19 @@ async def evaluate_per_question_async(
         )
         raw_res = await llm.ainvoke(prompt)
         raw = raw_res.content if hasattr(raw_res, "content") else str(raw_res)
-        
-        match = re.search(r'\{.*\}', raw.strip(), re.DOTALL)
-        if not match: raise ValueError("No JSON")
-        
+        logger.info("[EVAL RAW OUTPUT] %s", raw[:2000])
+
+        match = re.search(r"\{.*\}", raw.strip(), re.DOTALL)
+        if not match:
+            raise ValueError("No JSON")
+
         result = json.loads(match.group())
-        return result
+        normalized = normalize_eval_result(result)
+        return normalized
     except Exception as e:
-        logger.error(f"Per-question evaluation failed: {e}")
-        return {"error": str(e), "evaluations": []}
+        logger.error("Per-question evaluation failed: %s", e)
+        fallback = {"error": str(e), "evaluations": []}
+        return normalize_eval_result(fallback)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -280,6 +284,164 @@ def _fallback_result(no_ref: bool) -> dict:
         "plagiarism": "No comparison data" if no_ref else "Analysis timed out",
         "status": "partial"
     }
+
+
+def _ensure_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        items = []
+        for v in value:
+            s = str(v).strip()
+            if s:
+                items.append(s)
+        return items
+    if isinstance(value, str):
+        s = value.strip()
+        return [s] if s else []
+    s = str(value).strip()
+    return [s] if s else []
+
+
+def normalize_eval_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize evaluation output into a stable shape for Engine mode.
+
+    Always ensures:
+      - gaps: list[str]
+      - suggestions: list[str]
+      - improvements: list[str]
+      - analysis: str
+    """
+    if result is None:
+        result = {}
+
+    try:
+        logger.info("[EVAL RAW OUTPUT] %s", json.dumps(result, ensure_ascii=False)[:2000])
+    except Exception:
+        logger.info("[EVAL RAW OUTPUT] %s", str(result)[:2000])
+
+    normalized: Dict[str, Any] = dict(result)
+
+    # ── 1. Collect gaps from primary + alternate field names
+    gaps: list[str] = []
+    alt_gap_keys = [
+        "gaps",
+        "missing_points",
+        "weaknesses",
+        "deficiencies",
+        "limitations",
+        "missing_items",
+    ]
+    for key in alt_gap_keys:
+        if key in result:
+            gaps.extend(_ensure_list(result.get(key)))
+
+    summary = result.get("summary") or {}
+    if not gaps and isinstance(summary, dict):
+        gaps.extend(_ensure_list(summary.get("key_weaknesses")))
+
+    gaps = [g for g in gaps if g]
+
+    # ── 2. Heuristic fallback from analysis text when gaps are empty
+    if not gaps:
+        analysis_sources: list[str] = []
+        if isinstance(summary, dict):
+            if isinstance(summary.get("analysis"), str):
+                analysis_sources.append(summary.get("analysis"))  # type: ignore[arg-type]
+            analysis_sources.extend(_ensure_list(summary.get("key_weaknesses")))
+
+        evaluations = result.get("evaluations") or []
+        if isinstance(evaluations, list):
+            for ev in evaluations:
+                if not isinstance(ev, dict):
+                    continue
+                details = ev.get("details") or {}
+                if isinstance(details, dict):
+                    if isinstance(details.get("analysis"), str):
+                        analysis_sources.append(details.get("analysis"))  # type: ignore[arg-type]
+
+        joined = ". ".join([s for s in analysis_sources if isinstance(s, str)])
+        sentences = re.split(r"(?<=[.!?])\s+", joined)
+        for sent in sentences:
+            s = sent.strip()
+            if not s:
+                continue
+            low = s.lower()
+            if any(token in low for token in ["lack", "lacks", "missing", "does not", "no ", "insufficient", "unclear", "limited"]):
+                cleaned = re.sub(r"^\b(the answer|the paper)\b\s+", "", s, flags=re.IGNORECASE)
+                cleaned = cleaned.rstrip(".")
+                if cleaned:
+                    cleaned = cleaned[0].upper() + cleaned[1:]
+                    gaps.append(cleaned)
+            if len(gaps) >= 3:
+                break
+
+    # ── 3. Final fallback when no gaps could be extracted
+    if not gaps:
+        gaps = ["No major gaps identified."]
+
+    normalized["gaps"] = gaps
+
+    # ── 4. Normalize suggestions
+    suggestions = _ensure_list(result.get("suggestions"))
+    if not suggestions and isinstance(summary, dict):
+        suggestions = _ensure_list(summary.get("key_strengths"))
+    normalized["suggestions"] = suggestions
+
+    # ── 5. Normalize improvements
+    improvements = _ensure_list(result.get("improvements"))
+    if not improvements:
+        eval_improvements: list[str] = []
+        evaluations = result.get("evaluations") or []
+        if isinstance(evaluations, list):
+            for ev in evaluations:
+                if not isinstance(ev, dict):
+                    continue
+                details = ev.get("details") or {}
+                if isinstance(details, dict):
+                    eval_improvements.extend(_ensure_list(details.get("improvements")))
+        improvements = eval_improvements
+    normalized["improvements"] = improvements
+
+    # ── 6. Normalize analysis text
+    analysis_text = result.get("analysis")
+    if not isinstance(analysis_text, str) or not analysis_text.strip():
+        parts: list[str] = []
+        if isinstance(summary, dict):
+            if "overall_score" in summary:
+                try:
+                    parts.append(f"Overall score: {summary['overall_score']}")
+                except Exception:
+                    pass
+            key_weaks = _ensure_list(summary.get("key_weaknesses"))
+            if key_weaks:
+                parts.append("Key weaknesses: " + "; ".join(key_weaks[:3]))
+            key_strengths = _ensure_list(summary.get("key_strengths"))
+            if key_strengths:
+                parts.append("Key strengths: " + "; ".join(key_strengths[:3]))
+        analysis_text = " ".join(parts) if parts else "Evaluation completed."
+    normalized["analysis"] = analysis_text
+
+    # ── 7. Debug logging for gaps extraction
+    try:
+        logger.info(
+            "[EVAL NORMALIZED] %s",
+            json.dumps(
+                {
+                    "gaps_preview": normalized["gaps"][:3],
+                    "suggestions_preview": normalized["suggestions"][:3],
+                    "improvements_preview": normalized["improvements"][:3],
+                    "analysis_preview": str(normalized["analysis"])[:200],
+                },
+                ensure_ascii=False,
+            ),
+        )
+    except Exception:
+        pass
+    logger.info("[GAPS EXTRACTED] count=%d", len(normalized.get("gaps", [])))
+
+    return normalized
 
 def get_document_text(db, max_chars: int = 5000) -> str:
     try:
