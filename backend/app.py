@@ -648,35 +648,41 @@ async def analyze_plagiarism():
         if not text or not text.strip():
             raise HTTPException(status_code=400, detail="No active document text found.")
 
-        bracket_citations = len(re.findall(r"\[\s*\d{1,3}(?:\s*,\s*\d{1,3})*\s*\]", text))
-        author_year_citations = len(re.findall(r"\(([A-Z][A-Za-z\-]+(?:\s+et al\.)?,\s*(?:19|20)\d{2})\)", text))
-        doi_mentions = len(re.findall(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", text, flags=re.IGNORECASE))
-        has_references_section = bool(re.search(r"\b(references|bibliography|works cited)\b", text, flags=re.IGNORECASE))
+        # Lightweight literature overlap using fetched academic papers
+        from services.academic_intelligence import run_full_academic_analysis_async
 
-        total_citation_markers = bracket_citations + author_year_citations + doi_mentions + (1 if has_references_section else 0)
-        if bracket_citations >= author_year_citations and bracket_citations > 0:
-            style_guess = "Numeric ([1], [2])"
-        elif author_year_citations > 0:
-            style_guess = "Author-Year ((Author, 2023))"
-        elif doi_mentions > 0:
-            style_guess = "DOI-driven references"
+        analysis = await run_full_academic_analysis_async(text)
+        papers = analysis.get("similar_papers", []) or []
+
+        def _jaccard(a: str, b: str) -> float:
+            import re as _re
+
+            ta = set(_re.findall(r"\b[a-z]{4,}\b", (a or "").lower()))
+            tb = set(_re.findall(r"\b[a-z]{4,}\b", (b or "").lower()))
+            if not ta or not tb:
+                return 0.0
+            inter = len(ta & tb)
+            union = len(ta | tb)
+            return inter / union if union > 0 else 0.0
+
+        overlaps = []
+        for p in papers:
+            score = _jaccard(text, f"{p.get('title','')} {p.get('abstract','')}")
+            overlaps.append(score)
+
+        avg_overlap = sum(overlaps) / len(overlaps) if overlaps else 0.0
+        if avg_overlap >= 0.35:
+            level = "High conceptual similarity"
+        elif avg_overlap >= 0.18:
+            level = "Moderate thematic overlap"
         else:
-            style_guess = "Unknown"
-
-        if total_citation_markers == 0:
-            return {
-                "academic_reference_analysis": {
-                    "references_detected_count": 0,
-                    "citation_style_guess": "Unknown",
-                    "missing_references_warning": "No citation metadata detected in uploaded paper."
-                }
-            }
+            level = "Low overlap"
 
         return {
-            "academic_reference_analysis": {
-                "references_detected_count": int(total_citation_markers),
-                "citation_style_guess": style_guess,
-                "missing_references_warning": "" if has_references_section else "References section not clearly detected."
+            "literature_overlap_insights": {
+                "level": level,
+                "average_overlap_score": round(avg_overlap, 3),
+                "reference_paper_count": len(papers),
             }
         }
     except HTTPException:

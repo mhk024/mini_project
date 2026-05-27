@@ -21,17 +21,9 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 
-from services.semantic_scholar import (
-    search_papers,
-    get_similar_papers,
-    get_influential_papers,
-)
-from services.openalex import (
-    search_works,
-    get_topic_trends,
-    get_related_concepts,
-    get_trending_keywords,
-)
+from services.semantic_scholar import get_influential_papers
+from services.openalex import get_related_concepts
+from services.academic_search import search_semantic_scholar, search_openalex, merge_results
 from services.cache_manager import cache_manager
 from services.async_utils import run_with_timeout
 
@@ -468,38 +460,47 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
     topic = extract_research_topic(document_text)
     logger.info(f"RESEARCH_TOPIC={topic}")
 
-    # Parallel tasks
+    # Parallel tasks: external paper search + concepts
     tasks = {
-        "ss_similar":   search_papers(topic, limit=10),
+        "ss_list": search_semantic_scholar(topic, limit=5),
+        "oa_list": search_openalex(topic, limit=5),
         "ss_influential": get_influential_papers(topic, limit=5),
-        "oa_works":     search_works(topic, limit=10),
-        "trends":       get_domain_aware_trends_async(topic),
-        "concepts":     get_related_concepts(topic, limit=8)
+        "concepts": get_related_concepts(topic, limit=8),
     }
 
     results = {}
     for name, coro in tasks.items():
-        results[name] = await run_with_timeout(coro, 15, fallback_value=[])
+        results[name] = await run_with_timeout(coro, 10, fallback_value=[])
 
-    ss_similar = results["ss_similar"] or []
+    ss_list = results["ss_list"] or []
+    oa_list = results["oa_list"] or []
+    merged_papers = merge_results(ss_list, oa_list, limit=8)
     ss_influential = results["ss_influential"] or []
-    oa_works = results["oa_works"] or []
-    domain_trends = results["trends"] or {}
     oa_concepts = results["concepts"] or []
 
-    quality_scores = compute_enhanced_quality(metadata, ss_similar, oa_works)
+    quality_scores = compute_enhanced_quality(metadata, merged_papers, [])
     novelty_score = quality_scores["novelty_score"]
-    missing_citations = find_missing_citations(metadata, ss_similar, ss_influential)
+    missing_citations = find_missing_citations(metadata, merged_papers, ss_influential)
 
-    if not ss_similar and not oa_works:
+    # Build simple trends from fetched papers only
+    year_counts = {}
+    for p in merged_papers:
+        y = p.get("year")
+        if not y:
+            continue
+        year_counts[y] = year_counts.get(y, 0) + 1
+    yearly_counts = [
+        {"year": y, "count": year_counts[y]} for y in sorted(year_counts.keys())
+    ]
+    total_pubs = sum(y["count"] for y in yearly_counts)
+
+    if not merged_papers:
         fallback_msg = "No strong academic matches found."
         domain_trends = {
             "keyword": topic,
-            "is_generic": False,
             "warning_message": fallback_msg,
             "overall_trends": {"keyword": topic, "yearly_counts": [], "total": 0, "trend": "unknown"},
             "main_trending_keywords": [],
-            "subdomains": [],
             "publication_count": 0,
             "render": False,
         }
@@ -510,16 +511,39 @@ async def run_full_academic_analysis_async(document_text: str) -> dict:
             "details": "External scholarly APIs returned no strong matches for this topic."
         }]
     else:
-        total_publications = int((domain_trends.get("overall_trends") or {}).get("total", 0) or 0)
-        domain_trends["publication_count"] = total_publications
-        domain_trends["render"] = total_publications > 0
-        if total_publications <= 0:
-            domain_trends["warning_message"] = "No strong academic matches found."
+        trend_label = "unknown"
+        if len(yearly_counts) >= 2:
+            first = yearly_counts[0]["count"]
+            last = yearly_counts[-1]["count"]
+            if first > 0:
+                ratio = last / first
+                if ratio > 1.2:
+                    trend_label = "growing"
+                elif ratio < 0.8:
+                    trend_label = "declining"
+                else:
+                    trend_label = "stable"
+
+        domain_trends = {
+            "keyword": topic,
+            "warning_message": "",
+            "overall_trends": {
+                "keyword": topic,
+                "yearly_counts": yearly_counts,
+                "total": total_pubs,
+                "trend": trend_label,
+            },
+            "main_trending_keywords": [],
+            "publication_count": total_pubs,
+            "render": total_pubs > 0,
+        }
+        if total_pubs == 0:
+            domain_trends["warning_message"] = "Not enough academic data available for trend analysis."
 
         suggestions = generate_research_suggestions(
             metadata,
-            ss_similar,
-            oa_works,
+            merged_papers,
+            [],
             domain_trends.get("overall_trends", {}),
             missing_citations,
             novelty_score,
