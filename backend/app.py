@@ -8,7 +8,7 @@ import os
 import sys
 import time
 import gc
-import logging
+
 # import psutil  # Removed to eliminate external dependency
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
@@ -16,7 +16,7 @@ load_dotenv()
 
 # Directory for uploaded and processed files. Render's slug is read‑only, so use a writable path.
 DATASET_DIR = os.getenv("DATASET_DIR", os.path.join(os.getenv("TMPDIR", "/tmp"), "dataset"))
-import asyncio
+
 from datetime import datetime
 from contextlib import asynccontextmanager
 
@@ -155,7 +155,7 @@ class SetFileRequest(BaseModel):
 
 
 import json
-import uuid
+
 
 USERS_FILE = "users.json"
 HISTORY_FILE = "history.json"

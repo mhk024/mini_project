@@ -12,3 +12,13 @@ RETRIEVAL_KEEP_K = 5
 
 # Similarity threshold used by evaluator/plagiarism detection
 SIMILARITY_THRESHOLD = 0.45
+
+# ---------- New defaults for upload & chunking ----------
+import os
+
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 100
+MAX_CHUNKS = int(os.getenv("MAX_CHUNKS", 20))
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+# Ensure the uploads directory exists at import time (lightweight)
+os.makedirs(UPLOAD_DIR, exist_ok=True)

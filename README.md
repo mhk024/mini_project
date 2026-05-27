@@ -135,8 +135,11 @@ mini_project/
 │   └── test_rag.py               # RAG testing module
 │
 ├── screenshots/                  # Project screenshots/output
+│   ├── login.png
 │   ├── home.png
-│   └── response.png
+│   ├── response.png
+│   ├── ui_features.png
+│   └── analysis_feature.png
 │
 └── assets/                       # Additional project assets
     └── ...
@@ -145,9 +148,11 @@ mini_project/
 ---
 
 ## Screenshots / Output
+login.png
 home.png
 response.png
-
+ui_features.png
+analysis_feature.png
 ---
 
 ## Conclusion
