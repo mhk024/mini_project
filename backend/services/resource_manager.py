@@ -2,6 +2,7 @@ import os
 import logging
 import threading
 from typing import Any, Optional
+import asyncio
 import httpx
 
 logger = logging.getLogger(__name__)
