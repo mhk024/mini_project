@@ -75,6 +75,7 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 html, body, [class*="css"] { font-family: 'Outfit', 'Inter', sans-serif; }
+body { color: var(--text-primary); }
 
 /* ── Gradient title ── */
 h1 {
@@ -92,21 +93,19 @@ h1 {
 
 /* ── Modern Glassmorphism Card ── */
 .ai-card {
-    background: rgba(17, 24, 39, 0.7);
-    backdrop-filter: blur(12px) saturate(180%);
-    -webkit-backdrop-filter: blur(12px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.125);
-    border-radius: 20px;
-    padding: 24px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg, 18px);
+    padding: 20px;
     margin: 12px 0;
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    animation: fadeIn 0.6s ease-out;
+    box-shadow: var(--shadow-soft);
+    transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    animation: fadeIn 0.35s ease-out;
 }
 .ai-card:hover {
-    transform: translateY(-4px);
+    transform: translateY(-2px);
     border-color: rgba(99, 102, 241, 0.4);
-    box-shadow: 0 12px 40px 0 rgba(99, 102, 241, 0.15);
+    box-shadow: var(--shadow-hover, 0 14px 34px rgba(99, 102, 241, 0.12));
 }
 
 @keyframes fadeIn {
@@ -133,11 +132,12 @@ h1 {
 
 /* ── Researcher Dashboard Grid Enhancements ── */
 .research-stat-card {
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 16px;
+    background: var(--bg-card);
+    border-radius: var(--radius-md, 14px);
     padding: 16px;
     text-align: center;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-soft);
 }
 
 /* ── Mode pill tabs ── */
@@ -163,37 +163,78 @@ h1 {
     overflow-y: auto;
     padding: 10px;
     border-radius: 12px;
-    background: rgba(0, 0, 0, 0.1);
+    background: color-mix(in srgb, var(--bg-card) 90%, transparent);
+    border: 1px solid var(--border-color);
 }
 .paper-card {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
     border-radius: 14px;
     padding: 16px;
     margin-bottom: 12px;
-    transition: transform 0.2s, border-color 0.2s;
+    transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+    box-shadow: var(--shadow-soft);
 }
 .paper-card:hover {
     transform: translateX(4px);
     border-color: rgba(99, 102, 241, 0.3);
-    background: rgba(255, 255, 255, 0.06);
+    box-shadow: var(--shadow-hover, 0 14px 34px rgba(99, 102, 241, 0.12));
 }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <style>
-[data-testid="stAppViewContainer"] {
-    background: radial-gradient(circle at 20% 0%, #1e293b 0%, #0b1020 38%, #05070f 100%);
+:root {
+    --bg-primary: #05070f;
+    --bg-card: rgba(15, 23, 42, 0.55);
+    --bg-sidebar: linear-gradient(180deg, rgba(8, 13, 28, 0.98), rgba(10, 16, 34, 0.92));
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --border-color: rgba(148, 163, 184, 0.2);
+    --shadow-soft: 0 12px 34px rgba(2, 6, 23, 0.36);
+    --shadow-hover: 0 14px 34px rgba(99, 102, 241, 0.12);
+    --radius-lg: 18px;
+    --radius-md: 14px;
+    --radius-sm: 12px;
+    --focus-ring: 0 0 0 3px rgba(99, 102, 241, 0.22);
 }
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg-primary: #f5f7fb;
+        --bg-card: #ffffff;
+        --bg-sidebar: linear-gradient(180deg, #ffffff, #f8fafc);
+        --text-primary: #111827;
+        --text-secondary: #4b5563;
+        --border-color: rgba(15, 23, 42, 0.12);
+        --shadow-soft: 0 8px 20px rgba(15, 23, 42, 0.08);
+        --shadow-hover: 0 12px 26px rgba(99, 102, 241, 0.14);
+    }
+}
+[data-theme="light"] {
+    --bg-primary: #f5f7fb;
+    --bg-card: #ffffff;
+    --bg-sidebar: linear-gradient(180deg, #ffffff, #f8fafc);
+    --text-primary: #111827;
+    --text-secondary: #4b5563;
+    --border-color: rgba(15, 23, 42, 0.12);
+    --shadow-soft: 0 8px 20px rgba(15, 23, 42, 0.08);
+    --shadow-hover: 0 12px 26px rgba(99, 102, 241, 0.14);
+}
+[data-testid="stAppViewContainer"] { background: var(--bg-primary); }
 [data-testid="stHeader"], [data-testid="stToolbar"] { background: transparent; }
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, rgba(8, 13, 28, 0.98), rgba(10, 16, 34, 0.92));
-    border-right: 1px solid rgba(148, 163, 184, 0.16);
+[data-testid="stSidebar"] { background: var(--bg-sidebar); border-right: 1px solid var(--border-color); }
+.stApp { color: var(--text-primary); }
+
+/* Typography hierarchy */
+h2, h3, h4, h5 { color: var(--text-primary); letter-spacing: -0.01em; }
+[data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li {
+    color: var(--text-primary);
+    line-height: 1.6;
 }
 .dashboard-hero {
     padding: 16px 4px 18px;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    border-bottom: 1px solid var(--border-color);
     margin-bottom: 14px;
 }
 .dashboard-title {
@@ -201,33 +242,33 @@ st.markdown("""
     font-size: 34px;
     font-weight: 800;
     letter-spacing: -0.02em;
-    color: #f8fafc;
+    color: var(--text-primary);
 }
-.dashboard-subtitle { margin: 6px 0 0; color: #94a3b8; font-size: 14px; }
+.dashboard-subtitle { margin: 6px 0 0; color: var(--text-secondary); font-size: 14px; }
 .stats-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 12px 0 18px; }
 .stat-card {
-    background: linear-gradient(145deg, rgba(30,41,59,0.65), rgba(15,23,42,0.45));
-    border: 1px solid rgba(148, 163, 184, 0.2);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
     border-radius: 18px;
     padding: 14px 16px;
     min-height: 92px;
-    box-shadow: 0 10px 28px rgba(2, 6, 23, 0.4);
+    box-shadow: var(--shadow-soft);
     transition: all 0.3s ease;
 }
 .stat-card:hover { transform: translateY(-2px) scale(1.01); border-color: rgba(99,102,241,0.45); }
-.stat-k { color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
-.stat-v { color: #f8fafc; font-size: 24px; font-weight: 700; margin-top: 6px; }
+.stat-k { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+.stat-v { color: var(--text-primary); font-size: 24px; font-weight: 700; margin-top: 6px; }
 .stat-h { color: #60a5fa; font-size: 12px; margin-top: 4px; }
 .card-shell {
-    background: rgba(15, 23, 42, 0.55);
-    border: 1px solid rgba(148,163,184,0.2);
-    border-radius: 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
     padding: 18px;
     min-height: 320px;
-    box-shadow: 0 12px 34px rgba(2, 6, 23, 0.36);
+    box-shadow: var(--shadow-soft);
 }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.card-title { color: #e2e8f0; font-weight: 700; font-size: 16px; letter-spacing: 0.02em; }
+.card-title { color: var(--text-primary); font-weight: 700; font-size: 16px; letter-spacing: 0.02em; }
 .status-row { display:flex; gap:8px; flex-wrap: wrap; margin: 8px 0 12px; }
 .status-pill { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid transparent; }
 .status-success { color:#22c55e; background:rgba(34,197,94,.14); border-color:rgba(34,197,94,.34); }
@@ -235,10 +276,10 @@ st.markdown("""
 .status-analyzing { color:#60a5fa; background:rgba(96,165,250,.14); border-color:rgba(96,165,250,.34); }
 .status-cached { color:#a78bfa; background:rgba(167,139,250,.14); border-color:rgba(167,139,250,.34); }
 .status-live { color:#22d3ee; background:rgba(34,211,238,.14); border-color:rgba(34,211,238,.34); }
-.empty-state { min-height: 196px; border:1px dashed rgba(148,163,184,0.3); border-radius:16px; padding:20px; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; background:rgba(15,23,42,0.35);}
+.empty-state { min-height: 196px; border:1px dashed var(--border-color); border-radius:16px; padding:20px; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; background:var(--bg-card);}
 .empty-icon {font-size:22px; margin-bottom:8px;}
-.empty-title {color:#cbd5e1; font-weight:600;}
-.empty-subtitle {color:#64748b; font-size:13px; margin-top:4px;}
+.empty-title {color:var(--text-primary); font-weight:600;}
+.empty-subtitle {color:var(--text-secondary); font-size:13px; margin-top:4px;}
 .skeleton-wrap { margin-top: 8px; }
 .skeleton-line, .skeleton-chart { position:relative; overflow:hidden; background:rgba(148,163,184,0.12); border-radius:12px; margin-bottom:10px; }
 .skeleton-line { height:14px; }
@@ -255,23 +296,45 @@ st.markdown("""
     color:#fecaca; padding:10px 12px; border-radius:12px; margin-bottom:10px; font-size:13px;
 }
 .chat-shell {
-    border: 1px solid rgba(148,163,184,0.18);
-    border-radius: 18px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
     padding: 10px 12px;
-    background: rgba(15,23,42,0.35);
+    background: var(--bg-card);
     margin: 8px 0 12px;
 }
 .eval-header { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:6px 0 14px; }
-.eval-title { color:#e2e8f0; font-weight:700; font-size:18px; }
-.eval-sub { color:#94a3b8; font-size:13px; }
-.perf-metric { color:#94a3b8; font-size:11px; line-height:1.45; margin:2px 0; }
+.eval-title { color:var(--text-primary); font-weight:700; font-size:18px; }
+.eval-sub { color:var(--text-secondary); font-size:13px; }
+.perf-metric { color:var(--text-secondary); font-size:12px; line-height:1.5; margin:3px 0; }
+[data-testid="stMarkdownContainer"] p { color: var(--text-primary); }
 [data-testid="stSidebar"] details {
     transition: all 200ms ease;
 }
 [data-testid="stSidebar"] details summary {
-    color:#cbd5e1;
+    color:var(--text-primary);
     font-size:12px;
     font-weight:600;
+}
+[data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: var(--radius-md) !important;
+}
+[data-testid="stTextInput"] input::placeholder, [data-testid="stTextArea"] textarea::placeholder {
+    color: var(--text-secondary) !important;
+}
+[data-testid="stTextInput"] input:focus, [data-testid="stTextArea"] textarea:focus {
+    outline: none !important;
+    border-color: rgba(99,102,241,0.55) !important;
+    box-shadow: var(--focus-ring) !important;
+}
+
+/* Selectbox */
+[data-testid="stSelectbox"] div[role="combobox"] {
+    border: 1px solid var(--border-color) !important;
+    background: var(--bg-card) !important;
+    border-radius: var(--radius-md) !important;
 }
 [data-testid="stButton"] button {
     border-radius: 14px !important;
@@ -283,6 +346,21 @@ st.markdown("""
 }
 [data-testid="stButton"] button:hover { transform: translateY(-1px) scale(1.01); box-shadow: 0 12px 28px rgba(99,102,241,.36); }
 [data-testid="stButton"] button:disabled { opacity: .6; cursor: not-allowed; }
+[data-testid="stButton"] button:focus { box-shadow: 0 12px 28px rgba(99,102,241,.28), var(--focus-ring) !important; }
+
+/* Expander polish */
+details {
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--bg-card) 92%, transparent);
+}
+details[open] { box-shadow: var(--shadow-soft); }
+summary { padding: 10px 12px !important; }
+[data-testid="stSidebar"] > div:first-child {
+    padding-top: 14px;
+    padding-left: 12px;
+    padding-right: 12px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -290,6 +368,14 @@ st.markdown("""
 # ─────────────────────────────────────────────────────────────
 # 🧠  SESSION STATE
 # ─────────────────────────────────────────────────────────────
+def _fresh_perf_metrics():
+    return {
+        "Student": {"requests": 0, "total_latency_ms": 0.0, "cache_hits": 0, "failed_requests": 0},
+        "Research": {"requests": 0, "total_latency_ms": 0.0, "cache_hits": 0, "failed_requests": 0},
+        "Evaluate": {"requests": 0, "total_latency_ms": 0.0, "cache_hits": 0, "failed_requests": 0},
+    }
+
+
 DEFAULTS = {
     "logged_in":      False,
     "username":       "",
@@ -321,6 +407,7 @@ DEFAULTS = {
     "eval_errors": {},
     "show_perf_metrics": False,
     "perf_debug_mode": False,
+    "perf_metrics": _fresh_perf_metrics(),
     "sidebar_compact": False,
     "confirm_delete_sid": None,
     "confirm_delete_title": None,
@@ -473,6 +560,41 @@ def render_status_badges(statuses: list[str]):
     st.markdown(f'<div class="status-row">{pills}</div>', unsafe_allow_html=True)
 
 
+def _track_perf_metric(bucket: str, elapsed_ms: float, response=None, err: Exception | None = None):
+    metrics = st.session_state.setdefault("perf_metrics", _fresh_perf_metrics())
+    slot = metrics.setdefault(
+        bucket,
+        {"requests": 0, "total_latency_ms": 0.0, "cache_hits": 0, "failed_requests": 0},
+    )
+    slot["requests"] += 1
+    slot["total_latency_ms"] += max(0.0, elapsed_ms)
+    if err is not None or (response is not None and getattr(response, "status_code", 200) >= 400):
+        slot["failed_requests"] += 1
+    if response is not None:
+        try:
+            payload = response.json()
+            if isinstance(payload, dict) and payload.get("cache_hit"):
+                slot["cache_hits"] += 1
+        except Exception:
+            pass
+
+
+def timed_request(method: str, url: str, *, metric_bucket: str | None = None, **kwargs):
+    started = time.perf_counter()
+    response = None
+    error = None
+    try:
+        response = requests.request(method, url, **kwargs)
+        return response
+    except Exception as exc:
+        error = exc
+        raise
+    finally:
+        if metric_bucket:
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            _track_perf_metric(metric_bucket, elapsed_ms, response=response, err=error)
+
+
 def run_research_call(state_key: str, url: str, button_label: str, timeout: int, status_text: str):
     btn_key = f"btn_{state_key}"
     if st.button(button_label, key=btn_key, use_container_width=True, type="primary"):
@@ -482,7 +604,7 @@ def run_research_call(state_key: str, url: str, button_label: str, timeout: int,
             st.write("🔎 Collecting context...")
             st.write("🤖 Running AI analysis...")
             try:
-                r = requests.post(url, timeout=timeout)
+                r = timed_request("POST", url, metric_bucket="Research", timeout=timeout)
                 if r.status_code == 200:
                     st.session_state[state_key] = r.json()
                     status.update(label="✅ Analysis completed", state="complete", expanded=False)
@@ -798,9 +920,9 @@ with st.sidebar:
     health_color = "#10b981" if is_healthy else "#f87171"
     health_txt = "Backend Online" if is_healthy else "Backend Offline"
     st.markdown(f"""
-    <div style="display:flex;align-items:center;gap:10px;padding:10px;background:rgba(255,255,255,0.03);border-radius:12px;border:1px solid rgba(255,255,255,0.05);margin-bottom:15px">
+    <div style="display:flex;align-items:center;gap:10px;padding:12px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border-color);margin-bottom:15px;box-shadow:var(--shadow-soft)">
         <span class="pulse-indicator" style="background:{health_color};box-shadow:0 0 0 0 {health_color}44"></span>
-        <span style="font-size:13px;font-weight:600;color:#94a3b8">{health_txt}</span>
+        <span style="font-size:13px;font-weight:600;color:var(--text-secondary)">{health_txt}</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -849,8 +971,8 @@ with st.sidebar:
     _lbl = {"student": "🎓 Student / Faculty", "researcher": "🔬 Author / Researcher", "eval": "📊 Evaluation Workspace"}
     st.markdown(
         f"""
-        <div style="margin-top:8px;padding:8px 10px;border-radius:12px;border:1px solid rgba(96,165,250,0.4);
-                    background:rgba(30,58,138,0.2);color:#bfdbfe;font-size:12px;font-weight:600;">
+        <div style="margin-top:8px;padding:10px 12px;border-radius:12px;border:1px solid rgba(99,102,241,0.28);
+                    background:rgba(99,102,241,0.08);color:var(--text-primary);font-size:12px;font-weight:600;">
             Active workspace: {_lbl.get(st.session_state.mode, '')}
         </div>
         """,
@@ -863,24 +985,49 @@ with st.sidebar:
     except Exception:
         pass
 
-    dash = st.session_state.dashboard_data or {}
-    if dash and not st.session_state.sidebar_compact:
+    if not st.session_state.sidebar_compact:
         perf_label = "▼ Performance Metrics" if st.session_state.show_perf_metrics else "▶ Performance Metrics"
         if st.button(perf_label, key="perf_toggle_btn", use_container_width=True, type="secondary"):
             st.session_state.show_perf_metrics = not st.session_state.show_perf_metrics
 
         if st.session_state.show_perf_metrics:
             st.session_state.perf_debug_mode = st.toggle(
-                "Debug mode (show cache stats)",
+                "Enable performance panel",
                 value=st.session_state.perf_debug_mode,
                 key="perf_debug_toggle",
+                help="Keeps sidebar clean by default. Turn on only when needed.",
             )
-            for mk, label in [("Student", "Student"), ("Research", "Research"), ("Evaluate", "Evaluate"), ("EvalEngine", "Engine")]:
-                m = dash.get(mk, {})
-                line = f"{label}: q={m.get('total_queries',0)} | avg={m.get('avg_response_time_ms',0):.1f}ms"
-                if st.session_state.perf_debug_mode:
-                    line += f" | cache={m.get('cache_hit_rate',0)*100:.1f}%"
-                st.markdown(f"<div class='perf-metric'>{line}</div>", unsafe_allow_html=True)
+
+            if st.session_state.perf_debug_mode:
+                perf = st.session_state.get("perf_metrics", {})
+                active_sections = []
+                for section in ["Student", "Research", "Evaluate"]:
+                    bucket = perf.get(section, {})
+                    req = int(bucket.get("requests", 0))
+                    if req <= 0:
+                        continue
+                    avg = float(bucket.get("total_latency_ms", 0.0)) / req
+                    cache_hits = int(bucket.get("cache_hits", 0))
+                    failed = int(bucket.get("failed_requests", 0))
+                    active_sections.append((section, req, avg, cache_hits, failed))
+
+                status = "Active" if active_sections else "Idle"
+                st.markdown(f"<div class='perf-metric'><strong>Status:</strong> {status}</div>", unsafe_allow_html=True)
+
+                if not active_sections:
+                    st.markdown("<div class='perf-metric'>System idle</div>", unsafe_allow_html=True)
+                    st.markdown("<div class='perf-metric'>No recent activity</div>", unsafe_allow_html=True)
+                else:
+                    for section, req, avg, cache_hits, failed in active_sections:
+                        cache_rate = (cache_hits / req) * 100 if req else 0
+                        st.markdown(
+                            f"<div class='perf-metric'><strong>{section}</strong>: Requests {req} | Avg latency {avg:.0f}ms</div>",
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(
+                            f"<div class='perf-metric'>Cache hit rate {cache_rate:.0f}% | Failed {failed}</div>",
+                            unsafe_allow_html=True,
+                        )
 
     st.divider()
 
@@ -1279,7 +1426,7 @@ if st.session_state.mode == "student":
                     time.sleep(0.1)
                     st.write("✨ Enhancing with ML context...")
                     
-                    r = requests.post(API_URL, json={
+                    r = timed_request("POST", API_URL, metric_bucket="Student", json={
                         "username":   st.session_state.username,
                         "question":   prompt,
                         "filename":   st.session_state.loaded_file,
@@ -1567,8 +1714,10 @@ elif st.session_state.mode == "researcher":
         if st.button("▶ Run Unified Analysis", key="btn_unified", use_container_width=True, type="primary"):
             with st.status("🔬 Running Full Evaluation...", expanded=True) as status:
                 st.write("📄 Processing multiple modules...")
-                r = requests.post(
+                r = timed_request(
+                    "POST",
                     ANA_PAPER,
+                    metric_bucket="Research",
                     json={
                         "filename": st.session_state.loaded_file,
                         "reference_text": ref_text or ""
@@ -1656,16 +1805,14 @@ elif st.session_state.mode == "researcher":
             with st.status("🌐 Querying Semantic Scholar + OpenAlex...", expanded=True) as status:
                 st.write("📡 Connecting to academic APIs...")
                 
-                # Debug log
-                st.write(f"🔍 Debug: Requesting POST {ACAD_FULL}")
-                print(f"DEBUG: Requesting POST {ACAD_FULL} with filename={st.session_state.loaded_file}")
-                
-                r = requests.post(ACAD_FULL, json={"filename": st.session_state.loaded_file}, timeout=120)
-                
-                # Debug log
-                st.write(f"🔍 Debug: Response Status {r.status_code}")
-                print(f"DEBUG: Response Status {r.status_code}")
-                
+                r = timed_request(
+                    "POST",
+                    ACAD_FULL,
+                    metric_bucket="Research",
+                    json={"filename": st.session_state.loaded_file},
+                    timeout=120,
+                )
+
                 if r.status_code == 200:
                     data = r.json()
                     st.session_state.academic_similar = {
@@ -2082,7 +2229,7 @@ elif st.session_state.mode == "researcher":
                         loading_pipeline_animation(loader, STEPS, i)
 
                 with st.spinner("🧠 Processing…"):
-                    r = requests.post(API_URL, json={
+                    r = timed_request("POST", API_URL, metric_bucket="Research", json={
                         "username":   st.session_state.username,
                         "question":   prompt,
                         "filename":   st.session_state.loaded_file,
@@ -2159,8 +2306,10 @@ elif st.session_state.mode == "eval":
         col1, col2 = st.columns([1, 4])
         with col1:
             if st.button("▶ Run Evaluation", type="primary", use_container_width=True):
-                r = requests.post(
+                r = timed_request(
+                    "POST",
                     EVAL_URL,
+                    metric_bucket="Evaluate",
                     json={
                         "username": st.session_state.username,
                         "filename": st.session_state.loaded_file,
@@ -2184,7 +2333,7 @@ elif st.session_state.mode == "eval":
             with st.spinner("🧪 Evaluation running in background..."):
                 while True:
                     try:
-                        r = requests.get(f"{BASE}/status/{job_id}", timeout=120)
+                        r = timed_request("GET", f"{BASE}/status/{job_id}", metric_bucket="Evaluate", timeout=120)
                         if r.status_code == 200:
                             status_data = r.json()
                             status = status_data.get("status")
@@ -2319,8 +2468,10 @@ elif st.session_state.mode == "eval":
         if st.button("🚀 Run Academic Evaluation", key="btn_eval_engine", type="primary", use_container_width=True):
             with st.spinner("🧠 Analyzing paper on a per-question basis..."):
                 try:
-                    r = requests.post(
+                    r = timed_request(
+                        "POST",
                         f"{BASE}/academic/evaluate-questions",
+                        metric_bucket="Evaluate",
                         json={"questions": new_q_list, "filename": st.session_state.loaded_file},
                         timeout=300,
                     )
