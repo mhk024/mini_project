@@ -341,6 +341,36 @@ h2, h3, h4, h5 { color: var(--text-primary); letter-spacing: -0.01em; }
 .eval-header { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:6px 0 14px; }
 .eval-title { color:var(--text-primary); font-weight:700; font-size:18px; }
 .eval-sub { color:var(--text-secondary); font-size:13px; }
+.eval-summary-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:12px; margin:12px 0 14px; }
+.eval-summary-card {
+    background: linear-gradient(140deg, color-mix(in srgb, var(--bg-card) 88%, rgba(99,102,241,0.14)), color-mix(in srgb, var(--bg-card) 92%, transparent));
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 14px;
+    box-shadow: var(--shadow-soft);
+}
+.eval-summary-title { color: var(--text-secondary); font-size: 12px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.08em; }
+.eval-summary-text { color: var(--text-primary); font-size: 14px; line-height: 1.6; }
+.eval-chip-list { display:flex; flex-wrap:wrap; gap:8px; }
+.eval-chip {
+    border: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--bg-card) 92%, transparent);
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: var(--text-primary);
+}
+.eval-score-pill {
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    border-radius: 999px;
+    padding: 8px 14px;
+    background: linear-gradient(135deg, rgba(99,102,241,0.24), rgba(168,85,247,0.20));
+    border: 1px solid rgba(99,102,241,0.35);
+    color: var(--text-primary);
+    font-weight: 700;
+}
 .perf-metric { color:var(--text-secondary); font-size:12px; line-height:1.5; margin:3px 0; }
 [data-testid="stMarkdownContainer"] p { color: var(--text-primary); }
 [data-testid="stSidebar"] details {
@@ -396,6 +426,15 @@ summary { padding: 10px 12px !important; }
     padding-top: 14px;
     padding-left: 12px;
     padding-right: 12px;
+}
+@media (max-width: 900px) {
+    .card-shell { padding: 12px; border-radius: 14px; }
+    .eval-header { align-items: flex-start; }
+    .eval-summary-grid { grid-template-columns: 1fr; gap: 10px; }
+    .papers-scroll { padding: 8px; }
+    .paper-card { padding: 12px; }
+    [data-testid="stButton"] button { width: 100% !important; }
+    [data-testid="column"] { min-width: 0 !important; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -659,6 +698,74 @@ def run_research_call(state_key: str, url: str, button_label: str, timeout: int,
                 st.session_state.setdefault("research_errors", {})[state_key] = f"Network error: {exc}"
                 status.update(label="❌ Request failed", state="error", expanded=False)
             st.session_state.setdefault("research_loading", {})[state_key] = False
+
+
+def normalize_engine_result(data: dict, questions: list[str] | None = None) -> dict:
+    questions = questions or []
+    payload = data if isinstance(data, dict) else {}
+
+    def _as_list(value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [strip_html(str(v)) for v in value if str(v).strip()]
+        text = strip_html(str(value))
+        return [text] if text else []
+
+    evaluations_raw = payload.get("evaluations", [])
+    evaluations = evaluations_raw if isinstance(evaluations_raw, list) else []
+    normalized_rows = []
+    for i, ev in enumerate(evaluations):
+        ev = ev if isinstance(ev, dict) else {}
+        details = ev.get("details") if isinstance(ev.get("details"), dict) else {}
+        q = strip_html(str(ev.get("question") or (questions[i] if i < len(questions) else f"Question {i+1}")))
+        score = ev.get("score", 0)
+        try:
+            score = max(0.0, min(10.0, float(score)))
+        except Exception:
+            score = 0.0
+        normalized_rows.append({
+            "question": q,
+            "score": score,
+            "answer": strip_html(str(ev.get("answer") or "No answer generated.")),
+            "justification": strip_html(str(ev.get("justification") or details.get("analysis") or "No justification available.")),
+            "details": {
+                "analysis": strip_html(str(details.get("analysis") or ev.get("justification") or "Detailed analysis unavailable.")),
+                "gaps": _as_list(details.get("gaps")) or ["No major gaps identified."],
+                "improvements": _as_list(details.get("improvements")) or ["Consider adding stronger evidence and evaluation depth."],
+            },
+        })
+
+    summary = payload.get("summary", {})
+    summary = summary if isinstance(summary, dict) else {}
+    strength_list = _as_list(payload.get("strengths")) or _as_list(summary.get("key_strengths")) or ["No strengths identified."]
+    weakness_list = _as_list(payload.get("weaknesses")) or _as_list(summary.get("key_weaknesses")) or ["No weaknesses identified."]
+    scores = [row["score"] for row in normalized_rows]
+    avg_score = round(sum(scores) / len(scores), 1) if scores else 0.0
+    overall_score = summary.get("overall_score", payload.get("overall_score", avg_score))
+    try:
+        overall_score = max(0.0, min(10.0, float(overall_score)))
+    except Exception:
+        overall_score = avg_score
+    if overall_score == 0 and avg_score > 0:
+        overall_score = avg_score
+
+    detailed_summary = strip_html(str(payload.get("detailed_summary") or payload.get("analysis") or "Detailed summary unavailable."))
+    short_summary = strip_html(str(payload.get("short_summary") or ""))
+    if not short_summary:
+        short_summary = (detailed_summary[:250] + "...") if len(detailed_summary) > 250 else detailed_summary
+    if not short_summary:
+        short_summary = "Summary unavailable."
+
+    return {
+        "overall_score": overall_score,
+        "strengths": strength_list,
+        "weaknesses": weakness_list,
+        "evaluations": normalized_rows,
+        "questions": _as_list(payload.get("questions")) or questions,
+        "short_summary": short_summary,
+        "detailed_summary": detailed_summary,
+    }
 
 
 def render_doc_card(doc: dict, idx: int):
@@ -2502,6 +2609,7 @@ elif st.session_state.mode == "eval":
         st.session_state.mode_store["eval"]["questions"] = new_q_list
 
         if st.button("🚀 Run Academic Evaluation", key="btn_eval_engine", type="primary", use_container_width=True):
+            st.session_state["eval_engine_loading"] = True
             with st.spinner("🧠 Analyzing paper on a per-question basis..."):
                 try:
                     r = timed_request(
@@ -2512,40 +2620,78 @@ elif st.session_state.mode == "eval":
                         timeout=300,
                     )
                     if r.status_code == 200:
-                        st.session_state.mode_store["eval"]["engine_result"] = r.json().get("results")
+                        payload = r.json().get("results", {})
+                        st.session_state.mode_store["eval"]["engine_result"] = normalize_engine_result(payload, new_q_list)
                         _snapshot_mode_local("eval")
+                        st.session_state.setdefault("eval_errors", {})["engine"] = None
                         st.toast("Evaluation complete!", icon="✅")
                     else:
                         st.session_state.setdefault("eval_errors", {})["engine"] = r.text[:240]
+                        st.session_state.mode_store["eval"]["engine_result"] = None
                         st.error(f"Error: {r.text}")
                 except Exception as e:
                     st.session_state.setdefault("eval_errors", {})["engine"] = str(e)
+                    st.session_state.mode_store["eval"]["engine_result"] = None
                     st.error(f"Network error: {e}")
+                finally:
+                    st.session_state["eval_engine_loading"] = False
 
         st.divider()
         if st.session_state.get("eval_errors", {}).get("engine"):
             st.markdown(f"<div class='api-alert'><span>⚠️</span><span>{strip_html(st.session_state['eval_errors']['engine'])}</span></div>", unsafe_allow_html=True)
         res = st.session_state.mode_store["eval"].get("engine_result")
-        if res:
-            summary = res.get("summary", {})
-            st.markdown(f"#### 📊 Overall Score: {summary.get('overall_score', 0)}/10")
-            sc1, sc2 = st.columns(2)
-            with sc1:
-                st.markdown("##### ✅ Key Strengths")
-                for s in summary.get("key_strengths", []):
-                    st.markdown(f"<div class='contrib-item'><span class='contrib-bullet'>•</span>{s}</div>", unsafe_allow_html=True)
-            with sc2:
-                st.markdown("##### ⚠️ Key Weaknesses")
-                for w in summary.get("key_weaknesses", []):
-                    st.markdown(f"<div class='weakness-item'><span class='weakness-bullet'>•</span>{w}</div>", unsafe_allow_html=True)
+        if st.session_state.get("eval_engine_loading"):
+            render_skeleton_state(lines=6, chart=False)
+        elif res:
+            clean_res = normalize_engine_result(res, new_q_list)
+            score = clean_res.get("overall_score", 0)
+            st.markdown(
+                f"<div class='eval-score-pill'>📊 Overall Score <span style='font-size:18px'>{score:.1f}/10</span></div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"""
+                <div class="eval-summary-grid">
+                    <div class="eval-summary-card">
+                        <div class="eval-summary-title">Short Summary</div>
+                        <div class="eval-summary-text">{strip_html(clean_res.get("short_summary", "Summary unavailable."))}</div>
+                    </div>
+                    <div class="eval-summary-card">
+                        <div class="eval-summary-title">Key Strengths</div>
+                        <div class="eval-chip-list">
+                            {"".join(f"<span class='eval-chip'>{strip_html(item)}</span>" for item in clean_res.get("strengths", [])[:5])}
+                        </div>
+                    </div>
+                    <div class="eval-summary-card">
+                        <div class="eval-summary-title">Key Weaknesses</div>
+                        <div class="eval-chip-list">
+                            {"".join(f"<span class='eval-chip'>{strip_html(item)}</span>" for item in clean_res.get("weaknesses", [])[:5])}
+                        </div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown("#### 📑 Detailed Summary")
+            st.markdown(f"<div class='ai-card' style='padding:14px'>{strip_html(clean_res.get('detailed_summary', 'Detailed summary unavailable.'))}</div>", unsafe_allow_html=True)
             st.markdown("#### 📋 Detailed Evaluations")
-            for i, ev in enumerate(res.get("evaluations", [])):
-                with st.expander(f"Q{i+1}: {ev.get('question')} — Score: {ev.get('score')}/10"):
-                    st.markdown(f"**Answer:**\n{ev.get('answer')}")
-                    st.markdown(f"**Justification:**\n{ev.get('justification')}")
-                    details = ev.get("details", {})
-                    st.markdown("**🔍 Analysis Details**")
-                    st.markdown(details.get("analysis", ""))
+            evaluations = clean_res.get("evaluations", [])
+            if evaluations:
+                for i, ev in enumerate(evaluations):
+                    with st.expander(f"Q{i+1}: {ev.get('question')} — Score: {ev.get('score', 0):.1f}/10", expanded=False):
+                        st.markdown(f"**Answer:**\n{ev.get('answer', 'No answer generated.')}")
+                        st.markdown(f"**Justification:**\n{ev.get('justification', 'No justification available.')}")
+                        details = ev.get("details", {})
+                        st.markdown("**🔍 Analysis Details**")
+                        st.markdown(details.get("analysis", "Detailed analysis unavailable."))
+                        st.markdown("**⚠️ Gaps**")
+                        for gap in details.get("gaps", ["No major gaps identified."]):
+                            st.markdown(f"- {strip_html(gap)}")
+                        st.markdown("**💡 Improvements**")
+                        for item in details.get("improvements", ["No specific improvements provided."]):
+                            st.markdown(f"- {strip_html(item)}")
+            else:
+                render_empty_state("No detailed evaluations returned.", "📋")
         else:
             render_empty_state("No academic question evaluation generated yet.", "🎓")
         st.markdown("</div>", unsafe_allow_html=True)

@@ -1,9 +1,8 @@
-import re
 import os
 import time
 import logging
 import asyncio
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -73,6 +72,165 @@ async def _get_document_text_async(filename: Optional[str] = None) -> str:
     else:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             return f.read()[:20000]
+
+
+def _as_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        out: List[str] = []
+        for item in value:
+            s = str(item).strip()
+            if s:
+                out.append(s)
+        return out
+    s = str(value).strip()
+    return [s] if s else []
+
+
+def _to_score(value: Any) -> Optional[float]:
+    try:
+        score = float(value)
+    except Exception:
+        return None
+    if score < 0:
+        score = 0.0
+    if score > 10:
+        score = 10.0
+    return round(score, 1)
+
+
+def _extract_eval_strengths_weaknesses(evaluations: List[Dict[str, Any]]) -> tuple[List[str], List[str]]:
+    strengths: List[str] = []
+    weaknesses: List[str] = []
+    ranked = []
+    for ev in evaluations:
+        if not isinstance(ev, dict):
+            continue
+        score = _to_score(ev.get("score"))
+        ranked.append((score if score is not None else 0.0, ev))
+    ranked.sort(key=lambda x: x[0], reverse=True)
+
+    for score, ev in ranked[:3]:
+        details = ev.get("details") if isinstance(ev.get("details"), dict) else {}
+        analysis = str(details.get("analysis") or ev.get("justification") or "").strip()
+        question = str(ev.get("question") or "Question").strip()
+        if analysis:
+            strengths.append(f"{question}: {analysis[:120]}")
+        elif score >= 7:
+            strengths.append(f"{question}: Demonstrates clear understanding.")
+    for score, ev in ranked[-3:]:
+        details = ev.get("details") if isinstance(ev.get("details"), dict) else {}
+        gaps = _as_list(details.get("gaps"))
+        question = str(ev.get("question") or "Question").strip()
+        if gaps:
+            weaknesses.append(f"{question}: {gaps[0]}")
+        elif score <= 5:
+            weaknesses.append(f"{question}: Requires stronger evidence and methodological detail.")
+
+    return strengths[:3], weaknesses[:3]
+
+
+async def _generate_short_summary(llm: Any, detailed_summary: str) -> str:
+    base_text = (detailed_summary or "").strip()
+    if not base_text:
+        return "This evaluation provides a structured academic assessment of the paper's objectives, evidence quality, and contribution."
+    prompt = (
+        "Generate a concise academic summary in 3-5 lines from the following research paper analysis. "
+        "Use professional tone and include objective, findings, and contribution briefly. "
+        "Return plain text only.\n\n"
+        f"Analysis:\n{base_text[:3000]}"
+    )
+    try:
+        res = await llm.ainvoke(prompt)
+        text = (res.content if hasattr(res, "content") else str(res)).strip()
+        if not text:
+            return (base_text[:250] + "...") if len(base_text) > 250 else base_text
+        lines = [line.strip("- ").strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return (base_text[:250] + "...") if len(base_text) > 250 else base_text
+        return "\n".join(lines[:5])
+    except Exception:
+        return (base_text[:250] + "...") if len(base_text) > 250 else base_text
+
+
+async def _normalize_evaluation_payload(result: Dict[str, Any], questions: List[str], llm: Any) -> Dict[str, Any]:
+    data = result if isinstance(result, dict) else {}
+    evaluations = data.get("evaluations")
+    if not isinstance(evaluations, list):
+        evaluations = []
+
+    normalized_evaluations: List[Dict[str, Any]] = []
+    for idx, ev in enumerate(evaluations):
+        ev = ev if isinstance(ev, dict) else {}
+        details = ev.get("details") if isinstance(ev.get("details"), dict) else {}
+        gaps = _as_list(details.get("gaps"))
+        improvements = _as_list(details.get("improvements"))
+        analysis = str(details.get("analysis") or ev.get("justification") or "").strip()
+        score = _to_score(ev.get("score"))
+        question_text = str(ev.get("question") or (questions[idx] if idx < len(questions) else f"Question {idx + 1}")).strip()
+        answer_text = str(ev.get("answer") or "No answer generated.").strip()
+        justification = str(ev.get("justification") or analysis or "Detailed justification unavailable.").strip()
+
+        if not gaps:
+            gaps = ["Further evidence and methodological details are needed."]
+        if not improvements:
+            improvements = ["Provide clearer evidence and stronger comparative analysis."]
+
+        normalized_evaluations.append({
+            "question": question_text,
+            "answer": answer_text,
+            "score": score if score is not None else 0.0,
+            "justification": justification,
+            "details": {
+                "analysis": analysis or "No additional analysis available.",
+                "gaps": gaps,
+                "improvements": improvements,
+            },
+        })
+
+    summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+    question_scores = [ev.get("score", 0.0) for ev in normalized_evaluations if isinstance(ev.get("score"), (int, float))]
+    computed_avg = round(sum(question_scores) / len(question_scores), 1) if question_scores else 0.0
+    overall_score = _to_score(summary.get("overall_score"))
+    if overall_score is None or overall_score == 0:
+        overall_score = computed_avg
+
+    strengths = _as_list(data.get("strengths")) or _as_list(summary.get("key_strengths"))
+    weaknesses = _as_list(data.get("weaknesses")) or _as_list(summary.get("key_weaknesses"))
+    if not strengths or not weaknesses:
+        auto_strengths, auto_weaknesses = _extract_eval_strengths_weaknesses(normalized_evaluations)
+        strengths = strengths or auto_strengths or ["Strong conceptual framing and relevant topic coverage."]
+        weaknesses = weaknesses or auto_weaknesses or ["More rigorous validation and comparative evidence is needed."]
+
+    detailed_summary = str(data.get("detailed_summary") or data.get("analysis") or "").strip()
+    if not detailed_summary:
+        top_strength = strengths[0] if strengths else ""
+        top_weakness = weaknesses[0] if weaknesses else ""
+        detailed_summary = (
+            f"The evaluation indicates an overall score of {overall_score}/10. "
+            f"Key strength: {top_strength}. Key weakness: {top_weakness}."
+        ).strip()
+    short_summary = str(data.get("short_summary") or "").strip()
+    if not short_summary:
+        short_summary = await _generate_short_summary(llm, detailed_summary)
+
+    final_payload = {
+        "overall_score": overall_score,
+        "strengths": strengths[:5],
+        "weaknesses": weaknesses[:5],
+        "evaluations": normalized_evaluations,
+        "questions": [str(q).strip() for q in questions if str(q).strip()],
+        "short_summary": short_summary,
+        "detailed_summary": detailed_summary,
+        "summary": {
+            "overall_score": overall_score,
+            "key_strengths": strengths[:5],
+            "key_weaknesses": weaknesses[:5],
+        },
+    }
+    print("Evaluation Response:", final_payload)
+    return final_payload
 
 # ─────────────────────────────────────────────
 # 🔍  ENDPOINTS
@@ -171,22 +329,8 @@ async def evaluate_questions_endpoint(request: PerQuestionEvaluationRequest):
         result = await evaluate_per_question_async(
             llm, request.questions, text, request.context
         )
-        evaluations = result.get("evaluations", []) if isinstance(result, dict) else []
-        if isinstance(evaluations, list):
-            for ev in evaluations:
-                if not isinstance(ev, dict):
-                    continue
-                details = ev.get("details")
-                if not isinstance(details, dict):
-                    details = {}
-                    ev["details"] = details
-                gaps = details.get("gaps", [])
-                if isinstance(gaps, str):
-                    gaps = [gaps] if gaps.strip() else []
-                elif not isinstance(gaps, list):
-                    gaps = []
-                details["gaps"] = gaps
-        return {"status": "success", "results": result}
+        normalized = await _normalize_evaluation_payload(result, request.questions, llm)
+        return {"status": "success", "results": normalized}
     except HTTPException:
         raise
     except Exception as e:
